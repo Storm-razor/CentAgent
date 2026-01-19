@@ -33,7 +33,7 @@ func ListContainers(ctx context.Context, opts ListContainersOptions) ([]Containe
 		return nil, err
 	}
 
-	listOpts := types.ContainerListOptions{
+	listOpts := container.ListOptions{
 		All:   opts.All,
 		Limit: opts.Limit,
 	}
@@ -101,7 +101,7 @@ func StartContainer(ctx context.Context, containerID string) error {
 	if err != nil {
 		return err
 	}
-	return cli.ContainerStart(ctx, containerID, types.ContainerStartOptions{})
+	return cli.ContainerStart(ctx, containerID, container.StartOptions{})
 }
 
 // StopContainer 停止容器

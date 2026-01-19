@@ -5,16 +5,16 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/pkg/stdcopy"
 )
 
 // GetContainerLogsOptions 定义获取日志的参数
 type GetContainerLogsOptions struct {
-	ContainerID string
-	Tail        string // "all" or number
-	Since       string // timestamp or duration string
-	Details    	bool
+	ContainerID string `json:"container_id"`
+	Tail        string `json:"tail"`
+	Since       string `json:"since"`
+	Details     bool   `json:"details"`
 }
 
 // GetContainerLogs 获取容器日志 (stdout + stderr)
@@ -24,7 +24,7 @@ func GetContainerLogs(ctx context.Context, opts GetContainerLogsOptions) (string
 		return "", err
 	}
 
-	logOpts := types.ContainerLogsOptions{
+	logOpts := container.LogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
 		Timestamps: true,

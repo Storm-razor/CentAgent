@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/compose"
 )
 
@@ -15,9 +14,13 @@ const (
 )
 
 // BuildGraph 构建 Agent 的处理流程图
-func BuildGraph(ctx context.Context, chatModel model.ToolCallingChatModel) (compose.Runnable[AgentState, AgentState], error) {
+func BuildGraph(ctx context.Context) (compose.Runnable[AgentState, AgentState], error) {
 	//获取chatModel
 	cm, err := NewChatModel(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("init chat model failed: %w", err)
+	}
+
 	// 初始化 Graph，输入输出都是 AgentState
 	g := compose.NewGraph[AgentState, AgentState]()
 
@@ -32,17 +35,16 @@ func BuildGraph(ctx context.Context, chatModel model.ToolCallingChatModel) (comp
 	}))
 
 	// ToolsNode: 工具执行节点
-	// 1. 创建 ToolsNode
-	//todo...
+	// 创建 ToolsNode
 	tools := GetTools()
 	tn, err := NewToolsNode(ctx, &compose.ToolsNodeConfig{Tools: tools})
 	if err != nil {
 		return nil, fmt.Errorf("create tools node failed: %w", err)
 	}
 
-	// 2. 将工具信息添加到chatModel
-	//todo...
-	err = cm.BindTools()
+	// 将工具信息添加到chatModel
+	toolsInfo, err := GetToolsInfo(ctx)
+	err = cm.BindTools(toolsInfo)
 	if err != nil {
 		return nil, fmt.Errorf("bind tools to chat model failed: %w", err)
 	}

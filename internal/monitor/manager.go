@@ -11,6 +11,7 @@ type Manager struct {
 	cfg Config
 
 	stats *StatsCollector
+	logs  *LogCollector
 
 	started atomic.Bool
 
@@ -21,17 +22,35 @@ type Manager struct {
 	runErr   error
 }
 
-func NewManager(cfg Config, stats *StatsCollector) (*Manager, error) {
-	if stats == nil {
-		return nil, errors.New("stats collector is required")
-	}
+func NewManager(cfg Config) (*Manager, error) {
 	cfg.Stats = cfg.Stats.withDefaults()
-	stats.cfg = cfg.Stats
-
+	cfg.Logs = cfg.Logs.withDefaults()
 	return &Manager{
 		cfg:   cfg,
-		stats: stats,
+		stats: nil,
+		logs:  nil,
 	}, nil
+}
+func (m *Manager) WithStats(stats *StatsCollector) *Manager {
+	if m == nil {
+		return nil
+	}
+	m.stats = stats
+	if m.stats != nil {
+		m.stats.cfg = m.cfg.Stats
+	}
+	return m
+}
+
+func (m *Manager) WithLogs(logs *LogCollector) *Manager {
+	if m == nil {
+		return nil
+	}
+	m.logs = logs
+	if m.logs != nil {
+		m.logs.cfg = m.cfg.Logs
+	}
+	return m
 }
 
 func (m *Manager) Start(ctx context.Context) error {
@@ -46,10 +65,33 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.cancel = cancel
 
 	if m.cfg.Stats.Enabled {
+		if m.stats == nil {
+			m.cancel()
+			return errors.New("stats collector is required when stats enabled")
+		}
 		m.wg.Add(1)
 		go func() {
 			defer m.wg.Done()
 			if err := m.stats.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) {
+				m.runErrMu.Lock()
+				if m.runErr == nil {
+					m.runErr = err
+				}
+				m.runErrMu.Unlock()
+				m.cancel()
+			}
+		}()
+	}
+
+	if m.cfg.Logs.Enabled {
+		if m.logs == nil {
+			m.cancel()
+			return errors.New("logs collector is required when logs enabled")
+		}
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+			if err := m.logs.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) {
 				m.runErrMu.Lock()
 				if m.runErr == nil {
 					m.runErr = err
@@ -79,4 +121,3 @@ func (m *Manager) Wait() error {
 	defer m.runErrMu.Unlock()
 	return m.runErr
 }
-

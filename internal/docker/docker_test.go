@@ -210,7 +210,7 @@ func TestGetContainerLogs(t *testing.T) {
 		t.Fatalf("GetContainerLogs failed: %v", err)
 	}
 
-	if len(logs) == 0 {	
+	if len(logs) == 0 {
 		t.Log("Warning: Logs are empty")
 	} else {
 		// 为了调试方便，在测试中我们可以打印更长的日志，或者干脆全部打印

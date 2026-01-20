@@ -29,8 +29,35 @@ type StatsConfig struct {
 	OnError ErrorHandler
 }
 
+type LogConfig struct {
+	// Enabled 控制日志收集流水线是否启用（Events + Follow + 落库）。
+	Enabled bool
+
+	// QueueSize 为解析后日志记录的缓冲队列大小；队列满时会触发丢弃并回调 OnError。
+	QueueSize int
+	// BatchSize 为单次写入数据库的最大批量；达到批量即触发一次落库。
+	BatchSize int
+	// FlushInterval 为写入端的最大等待时间；即使未达到 BatchSize，也会按该间隔定时落库。
+	FlushInterval time.Duration
+
+	// MaxLineBytes 为单行日志的最大长度（字节）；超过会导致扫描报错并结束该容器 tailer。
+	MaxLineBytes int
+	// TailerLimit 为最多允许同时运行的 tailer 数（每容器一个）；超过则拒绝新增并回调 OnError。
+	TailerLimit int
+	// SinceFromStart 为 true 时，仅收集从 collector 启动时刻起的新日志（避免历史日志灌库）。
+	SinceFromStart bool
+	// ReconnectDelay 为 Events 断开后的基础重连间隔。
+	ReconnectDelay time.Duration
+	// ReconnectJitter 为重连抖动区间（±jitter），用于降低重连风暴风险。
+	ReconnectJitter time.Duration
+
+	// OnError 为异步错误回调（例如 events 断开、tailer 启动失败、队列满等）；默认丢弃。
+	OnError ErrorHandler
+}
+
 type Config struct {
 	Stats StatsConfig
+	Logs  LogConfig
 }
 
 func DefaultConfig() Config {
@@ -43,6 +70,17 @@ func DefaultConfig() Config {
 			BatchSize:       100,
 			FlushInterval:   2 * time.Second,
 			MaxRawJSONBytes: 1024,
+		},
+		Logs: LogConfig{
+			Enabled:         false,
+			QueueSize:       1024,
+			BatchSize:       200,
+			FlushInterval:   2 * time.Second,
+			MaxLineBytes:    64 * 1024,
+			TailerLimit:     128,
+			SinceFromStart:  true,
+			ReconnectDelay:  2 * time.Second,
+			ReconnectJitter: 500 * time.Millisecond,
 		},
 	}
 }
@@ -72,9 +110,30 @@ func (c StatsConfig) withDefaults() StatsConfig {
 	return c
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
+func (c LogConfig) withDefaults() LogConfig {
+	if c.QueueSize <= 0 {
+		c.QueueSize = 1024
 	}
-	return b
+	if c.BatchSize <= 0 {
+		c.BatchSize = 200
+	}
+	if c.FlushInterval <= 0 {
+		c.FlushInterval = 2 * time.Second
+	}
+	if c.MaxLineBytes <= 0 {
+		c.MaxLineBytes = 64 * 1024
+	}
+	if c.TailerLimit <= 0 {
+		c.TailerLimit = 128
+	}
+	if c.ReconnectDelay <= 0 {
+		c.ReconnectDelay = 2 * time.Second
+	}
+	if c.ReconnectJitter < 0 {
+		c.ReconnectJitter = 0
+	}
+	if c.OnError == nil {
+		c.OnError = func(error) {}
+	}
+	return c
 }

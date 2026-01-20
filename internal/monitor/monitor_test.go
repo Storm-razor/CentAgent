@@ -2,7 +2,9 @@ package monitor
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -15,6 +17,18 @@ import (
 	"github.com/wwwzy/CentAgent/internal/docker"
 	"github.com/wwwzy/CentAgent/internal/storage"
 )
+
+func openTestStorage(t *testing.T, ctx context.Context) *storage.Storage {
+	t.Helper()
+
+	dbPath := filepath.Join(t.TempDir(), "centagent-test.db")
+	store, err := storage.Open(ctx, storage.Config{Path: dbPath, EnableWAL: true})
+	if err != nil {
+		t.Fatalf("open storage: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	return store
+}
 
 func requireDocker(t *testing.T) {
 	t.Helper()
@@ -83,17 +97,12 @@ func ensureAnyRunningContainer(t *testing.T, ctx context.Context) string {
 }
 
 func TestManager_StatsPipeline_WritesRealDockerStatsToStorage(t *testing.T) {
-	t.Parallel()
 	requireDocker(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	store, err := storage.Open(ctx, storage.Config{InMemory: true})
-	if err != nil {
-		t.Fatalf("open storage: %v", err)
-	}
-	defer func() { _ = store.Close() }()
+	store := openTestStorage(t, ctx)
 
 	targetID := ensureAnyRunningContainer(t, ctx)
 
@@ -109,10 +118,11 @@ func TestManager_StatsPipeline_WritesRealDockerStatsToStorage(t *testing.T) {
 	cfg.Stats.Workers = 2
 	cfg.Stats.QueueSize = 64
 
-	mgr, err := NewManager(cfg, statsCollector)
+	mgr, err := NewManager(cfg)
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}
+	mgr.WithStats(statsCollector)
 
 	if err := mgr.Start(ctx); err != nil {
 		t.Fatalf("start manager: %v", err)
@@ -145,4 +155,131 @@ func TestManager_StatsPipeline_WritesRealDockerStatsToStorage(t *testing.T) {
 	}
 
 	t.Logf("latest stats: %+v", latest)
+}
+
+func TestManager_LogPipeline_CollectsRealDockerLogsToStorage(t *testing.T) {
+	requireDocker(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+
+	store := openTestStorage(t, ctx)
+
+	statsCollector, err := NewStatsCollector(store)
+	if err != nil {
+		t.Fatalf("new stats collector: %v", err)
+	}
+	logCollector, err := NewLogCollector(store)
+	if err != nil {
+		t.Fatalf("new log collector: %v", err)
+	}
+
+	cfg := DefaultConfig()
+	cfg.Stats.Enabled = false
+	cfg.Logs.Enabled = true
+	cfg.Logs.QueueSize = 256
+	cfg.Logs.BatchSize = 50
+	cfg.Logs.FlushInterval = 100 * time.Millisecond
+	cfg.Logs.ReconnectDelay = 300 * time.Millisecond
+	cfg.Logs.ReconnectJitter = 50 * time.Millisecond
+
+	mgr, err := NewManager(cfg)
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	mgr.WithStats(statsCollector)
+	mgr.WithLogs(logCollector)
+
+	if err := mgr.Start(ctx); err != nil {
+		t.Fatalf("start manager: %v", err)
+	}
+	defer mgr.Stop()
+
+	time.Sleep(300 * time.Millisecond)
+
+	cli, err := docker.GetClient()
+	if err != nil {
+		t.Fatalf("get docker client: %v", err)
+	}
+
+	imageName := "docker.1ms.run/library/alpine"
+	if _, err := cli.ImageInspect(ctx, imageName); err != nil {
+		if errdefs.IsNotFound(err) {
+			reader, err := cli.ImagePull(ctx, imageName, image.PullOptions{})
+			if err != nil {
+				t.Skipf("pull image %s failed: %v", imageName, err)
+			}
+			defer reader.Close()
+			_, _ = io.Copy(io.Discard, reader)
+		} else {
+			t.Skipf("inspect image %s failed: %v", imageName, err)
+		}
+	}
+
+	containerName := fmt.Sprintf("centagent-monitor-logs-test-%d", time.Now().UnixNano())
+	resp, err := cli.ContainerCreate(ctx,
+		&container.Config{
+			Image: imageName,
+			Cmd:   []string{"sh", "-c", "i=0; while [ $i -lt 30 ]; do echo Error: monitor-log-test-$i; i=$((i+1)); sleep 0.1; done; sleep 1"},
+		},
+		&container.HostConfig{
+			AutoRemove: true,
+		},
+		&network.NetworkingConfig{},
+		&v1.Platform{},
+		containerName,
+	)
+	if err != nil {
+		t.Skipf("create container failed: %v", err)
+	}
+	containerID := resp.ID
+
+	t.Cleanup(func() {
+		_ = cli.ContainerStop(context.Background(), containerID, container.StopOptions{})
+	})
+
+	if err := cli.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
+		_ = cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
+		t.Skipf("start container failed: %v", err)
+	}
+
+	waitCh, waitErrCh := cli.ContainerWait(ctx, containerID, container.WaitConditionNotRunning)
+	select {
+	case <-ctx.Done():
+		t.Fatalf("wait container exit: %v", ctx.Err())
+	case err := <-waitErrCh:
+		if err != nil {
+			t.Fatalf("wait container exit: %v", err)
+		}
+	case <-waitCh:
+	}
+
+	expectedLines := 30
+	deadline := time.Now().Add(8 * time.Second)
+	var all []storage.ContainerLog
+	for time.Now().Before(deadline) {
+		got, err := store.QueryContainerLogs(ctx, storage.LogQuery{
+			ContainerID: containerID,
+			Contains:    "Error: monitor-log-test-",
+			Limit:       5000,
+			Desc:        false,
+		})
+		if err != nil {
+			t.Fatalf("query container logs: %v", err)
+		}
+		all = got
+		if len(all) >= expectedLines {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	if len(all) == 0 {
+		t.Fatalf("expected logs to be collected for container %s", containerID)
+	}
+
+	t.Logf("all logs (%d): %+v", len(all), all)
+	if len(all) < expectedLines {
+		t.Fatalf("expected at least %d logs, got %d", expectedLines, len(all))
+	}
 }

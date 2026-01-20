@@ -7,6 +7,7 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/events"
 )
 
 // ListContainersOptions 定义 ListContainers 的参数
@@ -42,7 +43,7 @@ func ListContainers(ctx context.Context, opts ListContainersOptions) ([]Containe
 	if err != nil {
 		return nil, fmt.Errorf("failed to list containers: %w", err)
 	}
-	
+
 	var result []ContainerSummary
 	for _, c := range containers {
 		// 客户端简单的 Status 过滤
@@ -52,6 +53,42 @@ func ListContainers(ctx context.Context, opts ListContainersOptions) ([]Containe
 
 		result = append(result, ContainerSummary{
 			ID:      c.ID[:12],
+			Names:   strings.Join(c.Names, ","),
+			Image:   c.Image,
+			Status:  c.Status,
+			State:   c.State,
+			Created: c.Created,
+		})
+	}
+
+	return result, nil
+}
+
+// ListContainerDetail 列出详细容器
+func ListContainerDetail(ctx context.Context, opts ListContainersOptions) ([]ContainerSummary, error) {
+	cli, err := GetClient()
+	if err != nil {
+		return nil, err
+	}
+
+	listOpts := container.ListOptions{
+		All:   opts.All,
+		Limit: opts.Limit,
+	}
+
+	containers, err := cli.ContainerList(ctx, listOpts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	var result []ContainerSummary
+	for _, c := range containers {
+		if opts.Status != "" && c.State != opts.Status {
+			continue
+		}
+
+		result = append(result, ContainerSummary{
+			ID:      c.ID,
 			Names:   strings.Join(c.Names, ","),
 			Image:   c.Image,
 			Status:  c.Status,
@@ -95,6 +132,15 @@ func InspectContainer(ctx context.Context, containerID string) (*InspectContaine
 	}, nil
 }
 
+// InspectContainerDeatil 获取容器详细详情
+func InspectContainerDeatil(ctx context.Context, containerID string) (container.InspectResponse, error) {
+	cli, err := GetClient()
+	if err != nil {
+		return container.InspectResponse{}, err
+	}
+	return cli.ContainerInspect(ctx, containerID)
+}
+
 // StartContainer 启动容器
 func StartContainer(ctx context.Context, containerID string) error {
 	cli, err := GetClient()
@@ -123,6 +169,21 @@ func RestartContainer(ctx context.Context, containerID string) error {
 	return cli.ContainerRestart(ctx, containerID, container.StopOptions{})
 }
 
+// Events 获取容器事件流
+func Events(ctx context.Context, opts events.ListOptions) (<-chan events.Message, <-chan error) {
+	cli, err := GetClient()
+	if err != nil {
+		msgCh := make(chan events.Message)
+		errCh := make(chan error, 1)
+		close(msgCh)
+		errCh <- err
+		close(errCh)
+		return msgCh, errCh
+	}
+	return cli.Events(ctx, opts)
+}
+
+// GetContainerStats 获取容器统计信息
 func GetContainerStats(ctx context.Context, containerID string, stream bool) (container.StatsResponseReader, error) {
 	cli, err := GetClient()
 	if err != nil {
@@ -131,6 +192,7 @@ func GetContainerStats(ctx context.Context, containerID string, stream bool) (co
 	return cli.ContainerStats(ctx, containerID, stream)
 }
 
+// GetContainerStatsOneShot 获取容器统计信息（一次）
 func GetContainerStatsOneShot(ctx context.Context, containerID string) (container.StatsResponseReader, error) {
 	cli, err := GetClient()
 	if err != nil {

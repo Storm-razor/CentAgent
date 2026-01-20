@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/docker/docker/api/types/container"
@@ -60,4 +61,13 @@ func GetContainerLogs(ctx context.Context, opts GetContainerLogsOptions) (string
 	}
 
 	return result, nil
+}
+
+// ContainerLogs 获取容器日志流
+func ContainerLogs(ctx context.Context, containerID string, opts container.LogsOptions) (io.ReadCloser, error) {
+	cli, err := GetClient()
+	if err != nil {
+		return nil, err
+	}
+	return cli.ContainerLogs(ctx, containerID, opts)
 }

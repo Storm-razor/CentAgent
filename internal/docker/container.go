@@ -122,3 +122,19 @@ func RestartContainer(ctx context.Context, containerID string) error {
 	}
 	return cli.ContainerRestart(ctx, containerID, container.StopOptions{})
 }
+
+func GetContainerStats(ctx context.Context, containerID string, stream bool) (container.StatsResponseReader, error) {
+	cli, err := GetClient()
+	if err != nil {
+		return container.StatsResponseReader{}, err
+	}
+	return cli.ContainerStats(ctx, containerID, stream)
+}
+
+func GetContainerStatsOneShot(ctx context.Context, containerID string) (container.StatsResponseReader, error) {
+	cli, err := GetClient()
+	if err != nil {
+		return container.StatsResponseReader{}, err
+	}
+	return cli.ContainerStatsOneShot(ctx, containerID)
+}

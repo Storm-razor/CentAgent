@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,12 +15,28 @@ import (
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
+func requireDocker(t *testing.T) {
+	t.Helper()
+
+	cli, err := GetClient()
+	if err != nil {
+		t.Skipf("docker client unavailable: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := cli.Ping(ctx); err != nil {
+		t.Skipf("docker daemon unavailable: %v", err)
+	}
+}
+
 // setupTestContainer 启动一个测试用的容器 (nginx:alpine)，如果本地没有镜像会自动拉取
 // 返回容器ID和清理函数
 func setupTestContainer(t *testing.T, ctx context.Context) (string, func()) {
+	requireDocker(t)
+
 	cli, err := GetClient()
 	if err != nil {
-		t.Fatalf("Failed to get docker client: %v", err)
+		t.Skipf("Failed to get docker client: %v", err)
 	}
 
 	// 尝试优先使用本地镜像
@@ -28,9 +45,13 @@ func setupTestContainer(t *testing.T, ctx context.Context) (string, func()) {
 	if err == nil && len(images) > 0 {
 		for _, img := range images {
 			if len(img.RepoTags) > 0 && img.RepoTags[0] != "<none>:<none>" {
-				imageName = img.RepoTags[0]
-				t.Logf("Using local image: %s", imageName)
-				break
+				tag := img.RepoTags[0]
+				if strings.Contains(tag, "alpine") || strings.Contains(tag, "busybox") {
+					imageName = tag
+					t.Logf("Using local image: %s", imageName)
+					break
+				}
+				continue
 			}
 		}
 	}
@@ -58,12 +79,16 @@ func setupTestContainer(t *testing.T, ctx context.Context) (string, func()) {
 
 	// 2. 创建容器
 	containerName := fmt.Sprintf("centagent-test-%d", time.Now().UnixNano())
+
+	cfg := &container.Config{Image: imageName}
+	if !strings.Contains(imageName, "nginx") {
+		cfg.Cmd = []string{"sh", "-c", "sleep 600"}
+	}
+
 	resp, err := cli.ContainerCreate(ctx,
-		&container.Config{
-			Image: imageName,
-		},
+		cfg,
 		&container.HostConfig{
-			AutoRemove: true, // 测试完自动删除
+			AutoRemove: false,
 		},
 		&network.NetworkingConfig{},
 		&v1.Platform{},
@@ -86,10 +111,11 @@ func setupTestContainer(t *testing.T, ctx context.Context) (string, func()) {
 	// 返回清理函数
 	cleanup := func() {
 		t.Logf("Cleaning up container %s...", containerID)
-		// 这里虽然设置了 AutoRemove，但为了保险还是显式 Stop 一下
-		// 显式 Stop 后，AutoRemove 会起作用自动删除
 		if err := cli.ContainerStop(ctx, containerID, container.StopOptions{}); err != nil {
 			t.Logf("Failed to stop container %s: %v", containerID, err)
+		}
+		if err := cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true}); err != nil {
+			t.Logf("Failed to remove container %s: %v", containerID, err)
 		}
 		// 稍微等待一下
 		time.Sleep(1 * time.Second)
@@ -99,9 +125,11 @@ func setupTestContainer(t *testing.T, ctx context.Context) (string, func()) {
 }
 
 func TestGetClient(t *testing.T) {
+	requireDocker(t)
+
 	cli, err := GetClient()
 	if err != nil {
-		t.Fatalf("GetClient failed: %v", err)
+		t.Skipf("GetClient failed: %v", err)
 	}
 	if cli == nil {
 		t.Fatal("GetClient returned nil client")
@@ -111,12 +139,14 @@ func TestGetClient(t *testing.T) {
 	ctx := context.Background()
 	ping, err := cli.Ping(ctx)
 	if err != nil {
-		t.Fatalf("Failed to ping docker daemon: %v. Make sure Docker Desktop is running.", err)
+		t.Skipf("Failed to ping docker daemon: %v", err)
 	}
 	t.Logf("Docker Daemon API Version: %s", ping.APIVersion)
 }
 
 func TestListContainers(t *testing.T) {
+	requireDocker(t)
+
 	ctx := context.Background()
 	// 先启动一个测试容器确保列表不为空
 	_, cleanup := setupTestContainer(t, ctx)
@@ -145,6 +175,8 @@ func TestListContainers(t *testing.T) {
 }
 
 func TestInspectContainer(t *testing.T) {
+	requireDocker(t)
+
 	ctx := context.Background()
 	containerID, cleanup := setupTestContainer(t, ctx)
 	defer cleanup()
@@ -161,6 +193,8 @@ func TestInspectContainer(t *testing.T) {
 }
 
 func TestContainerLifecycle(t *testing.T) {
+	requireDocker(t)
+
 	ctx := context.Background()
 	containerID, cleanup := setupTestContainer(t, ctx)
 	defer cleanup()
@@ -168,13 +202,16 @@ func TestContainerLifecycle(t *testing.T) {
 	// 1. Restart
 	t.Log("Testing RestartContainer...")
 	if err := RestartContainer(ctx, containerID); err != nil {
-		t.Errorf("RestartContainer failed: %v", err)
+		t.Fatalf("RestartContainer failed: %v", err)
 	}
 
 	// 等待一下状态变化
 	time.Sleep(2 * time.Second)
 
-	info, _ := InspectContainer(ctx, containerID)
+	info, err := InspectContainer(ctx, containerID)
+	if err != nil {
+		t.Fatalf("InspectContainer after restart failed: %v", err)
+	}
 	if info.State.Status != "running" {
 		t.Errorf("Container should be running after restart, got %s", info.State.Status)
 	}
@@ -187,14 +224,14 @@ func TestContainerLifecycle(t *testing.T) {
 
 	// 再次检查状态
 	info, _ = InspectContainer(ctx, containerID)
-	// AutoRemove=true 的容器 Stop 后会消失，Inspect 可能会报错 NotFound，或者状态是 exited
-	// 如果 Inspect 报错 NotFound，说明 AutoRemove 生效了，这也是一种成功
 	if info != nil && info.State.Status == "running" {
 		t.Errorf("Container should not be running after stop")
 	}
 }
 
 func TestGetContainerLogs(t *testing.T) {
+	requireDocker(t)
+
 	ctx := context.Background()
 	containerID, cleanup := setupTestContainer(t, ctx)
 	defer cleanup()

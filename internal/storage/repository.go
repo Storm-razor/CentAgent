@@ -10,6 +10,9 @@ import (
 const (
 	defaultLimit = 200
 	maxLimit     = 5000
+
+	defaultDeleteLimit = 500
+	maxDeleteLimit     = 900
 )
 
 type StatsQuery struct {
@@ -32,7 +35,7 @@ func (s *Storage) InsertContainerStat(ctx context.Context, stat *ContainerStat) 
 	if stat == nil {
 		return errors.New("stat is nil")
 	}
-	now := time.Now()
+	now := time.Now().UTC()
 	if stat.CollectedAt.IsZero() {
 		stat.CollectedAt = now
 	}
@@ -52,7 +55,7 @@ func (s *Storage) InsertContainerStats(ctx context.Context, stats []ContainerSta
 	if len(stats) == 0 {
 		return nil
 	}
-	now := time.Now()
+	now := time.Now().UTC()
 	for i := range stats {
 		if stats[i].CollectedAt.IsZero() {
 			stats[i].CollectedAt = now
@@ -111,6 +114,68 @@ func (s *Storage) DeleteContainerStatsBefore(ctx context.Context, before time.Ti
 	return res.RowsAffected, nil
 }
 
+func (s *Storage) DeleteContainerStatsBeforeLimited(ctx context.Context, before time.Time, limit int) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, errors.New("storage not initialized")
+	}
+
+	limit = normalizeDeleteLimit(limit)
+
+	var ids []uint64
+	db := s.db.WithContext(ctx).Model(&ContainerStat{}).
+		Select("id").
+		Where("collected_at < ?", before).
+		Order("id ASC").
+		Limit(limit)
+	if err := db.Find(&ids).Error; err != nil {
+		return 0, fmt.Errorf("select container stats ids: %w", err)
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	res := s.db.WithContext(ctx).Where("id IN ?", ids).Delete(&ContainerStat{})
+	if res.Error != nil {
+		return 0, fmt.Errorf("delete container stats: %w", res.Error)
+	}
+	return res.RowsAffected, nil
+}
+
+func (s *Storage) DeleteContainerStatsNonAnomalyInRangeLimited(ctx context.Context, from time.Time, to time.Time, cpuHigh float64, memHigh float64, limit int) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, errors.New("storage not initialized")
+	}
+	if !to.After(from) {
+		return 0, nil
+	}
+
+	limit = normalizeDeleteLimit(limit)
+
+	db := s.db.WithContext(ctx).Model(&ContainerStat{}).
+		Select("id").
+		Where("collected_at >= ? AND collected_at < ?", from, to)
+	if cpuHigh > 0 {
+		db = db.Where("cpu_percent < ?", cpuHigh)
+	}
+	if memHigh > 0 {
+		db = db.Where("mem_percent < ?", memHigh)
+	}
+
+	var ids []uint64
+	if err := db.Order("id ASC").Limit(limit).Find(&ids).Error; err != nil {
+		return 0, fmt.Errorf("select container stats ids: %w", err)
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	res := s.db.WithContext(ctx).Where("id IN ?", ids).Delete(&ContainerStat{})
+	if res.Error != nil {
+		return 0, fmt.Errorf("delete container stats: %w", res.Error)
+	}
+	return res.RowsAffected, nil
+}
+
 type LogQuery struct {
 	// ContainerID/ContainerName 为可选过滤条件，均为精确匹配；通常优先使用 ContainerID（更稳定）。
 	ContainerID   string
@@ -136,7 +201,7 @@ func (s *Storage) InsertContainerLog(ctx context.Context, log *ContainerLog) err
 	if log == nil {
 		return errors.New("log is nil")
 	}
-	now := time.Now()
+	now := time.Now().UTC()
 	if log.Timestamp.IsZero() {
 		log.Timestamp = now
 	}
@@ -156,7 +221,7 @@ func (s *Storage) InsertContainerLogs(ctx context.Context, logs []ContainerLog) 
 	if len(logs) == 0 {
 		return nil
 	}
-	now := time.Now()
+	now := time.Now().UTC()
 	for i := range logs {
 		if logs[i].Timestamp.IsZero() {
 			logs[i].Timestamp = now
@@ -224,6 +289,68 @@ func (s *Storage) DeleteContainerLogsBefore(ctx context.Context, before time.Tim
 	return res.RowsAffected, nil
 }
 
+func (s *Storage) DeleteContainerLogsBeforeLimited(ctx context.Context, before time.Time, limit int) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, errors.New("storage not initialized")
+	}
+
+	limit = normalizeDeleteLimit(limit)
+
+	var ids []uint64
+	db := s.db.WithContext(ctx).Model(&ContainerLog{}).
+		Select("id").
+		Where("timestamp < ?", before).
+		Order("id ASC").
+		Limit(limit)
+	if err := db.Find(&ids).Error; err != nil {
+		return 0, fmt.Errorf("select container logs ids: %w", err)
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	res := s.db.WithContext(ctx).Where("id IN ?", ids).Delete(&ContainerLog{})
+	if res.Error != nil {
+		return 0, fmt.Errorf("delete container logs: %w", res.Error)
+	}
+	return res.RowsAffected, nil
+}
+
+func (s *Storage) DeleteContainerLogsUnimportantInRangeLimited(ctx context.Context, from time.Time, to time.Time, keepLevels []string, keepSources []string, limit int) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, errors.New("storage not initialized")
+	}
+	if !to.After(from) {
+		return 0, nil
+	}
+
+	limit = normalizeDeleteLimit(limit)
+
+	db := s.db.WithContext(ctx).Model(&ContainerLog{}).
+		Select("id").
+		Where("timestamp >= ? AND timestamp < ?", from, to)
+	if len(keepLevels) > 0 {
+		db = db.Where("level NOT IN ?", keepLevels)
+	}
+	if len(keepSources) > 0 {
+		db = db.Where("source NOT IN ?", keepSources)
+	}
+
+	var ids []uint64
+	if err := db.Order("id ASC").Limit(limit).Find(&ids).Error; err != nil {
+		return 0, fmt.Errorf("select container logs ids: %w", err)
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	res := s.db.WithContext(ctx).Where("id IN ?", ids).Delete(&ContainerLog{})
+	if res.Error != nil {
+		return 0, fmt.Errorf("delete container logs: %w", res.Error)
+	}
+	return res.RowsAffected, nil
+}
+
 // AuditQuery 用于查询审计记录的过滤条件。
 //
 // 设计原则：
@@ -257,7 +384,7 @@ func (s *Storage) InsertAuditRecord(ctx context.Context, rec *AuditRecord) error
 	if rec == nil {
 		return errors.New("audit record is nil")
 	}
-	now := time.Now()
+	now := time.Now().UTC()
 	if rec.CreatedAt.IsZero() {
 		rec.CreatedAt = now
 	}
@@ -357,6 +484,16 @@ func normalizeLimit(v int) int {
 	}
 	if v > maxLimit {
 		return maxLimit
+	}
+	return v
+}
+
+func normalizeDeleteLimit(v int) int {
+	if v <= 0 {
+		return defaultDeleteLimit
+	}
+	if v > maxDeleteLimit {
+		return maxDeleteLimit
 	}
 	return v
 }

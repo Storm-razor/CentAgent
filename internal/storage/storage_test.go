@@ -147,6 +147,115 @@ func TestContainerLogsQuery(t *testing.T) {
 	}
 }
 
+func TestRetentionPruneStatsAndLogs(t *testing.T) {
+	s := openTestStorage(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	keepAll := 3 * 24 * time.Hour
+	keepImportantUntil := 7 * 24 * time.Hour
+	cutAll := now.Add(-keepAll)
+	cutImportant := now.Add(-keepImportantUntil)
+
+	stats := []ContainerStat{
+		{ContainerID: "cid-a", ContainerName: "a", CPUPercent: 1, MemUsageBytes: 1, MemLimitBytes: 1, MemPercent: 1, NetRxBytes: 0, NetTxBytes: 0, BlockReadBytes: 0, BlockWriteBytes: 0, Pids: 1, CollectedAt: now.Add(-8 * 24 * time.Hour)},
+		{ContainerID: "cid-a", ContainerName: "a", CPUPercent: 10, MemUsageBytes: 1, MemLimitBytes: 1, MemPercent: 10, NetRxBytes: 0, NetTxBytes: 0, BlockReadBytes: 0, BlockWriteBytes: 0, Pids: 1, CollectedAt: now.Add(-5 * 24 * time.Hour)},
+		{ContainerID: "cid-a", ContainerName: "a", CPUPercent: 99, MemUsageBytes: 1, MemLimitBytes: 1, MemPercent: 10, NetRxBytes: 0, NetTxBytes: 0, BlockReadBytes: 0, BlockWriteBytes: 0, Pids: 1, CollectedAt: now.Add(-5 * 24 * time.Hour).Add(1 * time.Minute)},
+		{ContainerID: "cid-a", ContainerName: "a", CPUPercent: 5, MemUsageBytes: 1, MemLimitBytes: 1, MemPercent: 5, NetRxBytes: 0, NetTxBytes: 0, BlockReadBytes: 0, BlockWriteBytes: 0, Pids: 1, CollectedAt: now.Add(-1 * 24 * time.Hour)},
+	}
+	if err := s.InsertContainerStats(ctx, stats); err != nil {
+		t.Fatalf("insert stats: %v", err)
+	}
+
+	logs := []ContainerLog{
+		{ContainerID: "cid-a", ContainerName: "a", Source: "stdout", Level: "INFO", Message: "old", Timestamp: now.Add(-8 * 24 * time.Hour)},
+		{ContainerID: "cid-a", ContainerName: "a", Source: "stdout", Level: "INFO", Message: "mid-info", Timestamp: now.Add(-5 * 24 * time.Hour)},
+		{ContainerID: "cid-a", ContainerName: "a", Source: "stderr", Level: "INFO", Message: "mid-stderr", Timestamp: now.Add(-5 * 24 * time.Hour).Add(10 * time.Second)},
+		{ContainerID: "cid-a", ContainerName: "a", Source: "stdout", Level: "ERROR", Message: "mid-error", Timestamp: now.Add(-5 * 24 * time.Hour).Add(20 * time.Second)},
+		{ContainerID: "cid-a", ContainerName: "a", Source: "stdout", Level: "INFO", Message: "new", Timestamp: now.Add(-1 * 24 * time.Hour)},
+	}
+	if err := s.InsertContainerLogs(ctx, logs); err != nil {
+		t.Fatalf("insert logs: %v", err)
+	}
+
+	var deleted int64
+	for {
+		aff, err := s.DeleteContainerStatsBeforeLimited(ctx, cutImportant, 1)
+		if err != nil {
+			t.Fatalf("delete old stats: %v", err)
+		}
+		if aff == 0 {
+			break
+		}
+		deleted += aff
+	}
+	if deleted != 1 {
+		t.Fatalf("expected delete 1 old stat, got %d", deleted)
+	}
+
+	deleted = 0
+	for {
+		aff, err := s.DeleteContainerStatsNonAnomalyInRangeLimited(ctx, cutImportant, cutAll, 80, 80, 1)
+		if err != nil {
+			t.Fatalf("delete mid stats: %v", err)
+		}
+		if aff == 0 {
+			break
+		}
+		deleted += aff
+	}
+	if deleted != 1 {
+		t.Fatalf("expected delete 1 mid stat, got %d", deleted)
+	}
+
+	remainStats, err := s.QueryContainerStats(ctx, StatsQuery{ContainerID: "cid-a", From: &cutImportant, Limit: 50, Desc: false})
+	if err != nil {
+		t.Fatalf("query remaining stats: %v", err)
+	}
+	if len(remainStats) != 2 {
+		t.Fatalf("expected 2 remaining stats, got %d", len(remainStats))
+	}
+
+	var deletedLogs int64
+	for {
+		aff, err := s.DeleteContainerLogsBeforeLimited(ctx, cutImportant, 2)
+		if err != nil {
+			t.Fatalf("delete old logs: %v", err)
+		}
+		if aff == 0 {
+			break
+		}
+		deletedLogs += aff
+	}
+	if deletedLogs != 1 {
+		t.Fatalf("expected delete 1 old log, got %d", deletedLogs)
+	}
+
+	deletedLogs = 0
+	for {
+		aff, err := s.DeleteContainerLogsUnimportantInRangeLimited(ctx, cutImportant, cutAll, []string{"ERROR", "WARN"}, []string{"stderr"}, 1)
+		if err != nil {
+			t.Fatalf("delete mid logs: %v", err)
+		}
+		if aff == 0 {
+			break
+		}
+		deletedLogs += aff
+	}
+	if deletedLogs != 1 {
+		t.Fatalf("expected delete 1 mid log, got %d", deletedLogs)
+	}
+
+	from := now.Add(-9 * 24 * time.Hour)
+	remainLogs, err := s.QueryContainerLogs(ctx, LogQuery{ContainerID: "cid-a", From: &from, Limit: 50, Desc: false})
+	if err != nil {
+		t.Fatalf("query remaining logs: %v", err)
+	}
+	if len(remainLogs) != 3 {
+		t.Fatalf("expected 3 remaining logs, got %d", len(remainLogs))
+	}
+}
+
 func TestAuditInsertQueryUpdate(t *testing.T) {
 	s := openTestStorage(t)
 	ctx := context.Background()

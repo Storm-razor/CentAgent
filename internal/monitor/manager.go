@@ -12,6 +12,7 @@ type Manager struct {
 
 	stats *StatsCollector
 	logs  *LogCollector
+	ret   *RetentionCollector
 
 	started atomic.Bool
 
@@ -25,10 +26,12 @@ type Manager struct {
 func NewManager(cfg Config) (*Manager, error) {
 	cfg.Stats = cfg.Stats.withDefaults()
 	cfg.Logs = cfg.Logs.withDefaults()
+	cfg.Retention = cfg.Retention.withDefaults()
 	return &Manager{
 		cfg:   cfg,
 		stats: nil,
 		logs:  nil,
+		ret:   nil,
 	}, nil
 }
 func (m *Manager) WithStats(stats *StatsCollector) *Manager {
@@ -49,6 +52,17 @@ func (m *Manager) WithLogs(logs *LogCollector) *Manager {
 	m.logs = logs
 	if m.logs != nil {
 		m.logs.cfg = m.cfg.Logs
+	}
+	return m
+}
+
+func (m *Manager) WithRetention(ret *RetentionCollector) *Manager {
+	if m == nil {
+		return nil
+	}
+	m.ret = ret
+	if m.ret != nil {
+		m.ret.cfg = m.cfg.Retention
 	}
 	return m
 }
@@ -92,6 +106,25 @@ func (m *Manager) Start(ctx context.Context) error {
 		go func() {
 			defer m.wg.Done()
 			if err := m.logs.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) {
+				m.runErrMu.Lock()
+				if m.runErr == nil {
+					m.runErr = err
+				}
+				m.runErrMu.Unlock()
+				m.cancel()
+			}
+		}()
+	}
+
+	if m.cfg.Retention.Enabled {
+		if m.ret == nil {
+			m.cancel()
+			return errors.New("retention collector is required when retention enabled")
+		}
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+			if err := m.ret.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) {
 				m.runErrMu.Lock()
 				if m.runErr == nil {
 					m.runErr = err

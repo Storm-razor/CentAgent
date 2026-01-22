@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/cloudwego/eino/compose"
-	"github.com/wwwzy/CentAgent/internal/config"
 )
 
 const (
@@ -13,9 +12,13 @@ const (
 	NodeChatModel = "chat_model_node"
 	NodeTools     = "tools_node"
 )
-
+type ArkConfig struct {
+	APIKey  string `mapstructure:"api_key"`
+	ModelID string `mapstructure:"model_id"`
+	BaseURL string `mapstructure:"base_url"`
+}
 // BuildGraph 构建 Agent 的处理流程图
-func BuildGraph(ctx context.Context, arkConfig config.ArkConfig) (compose.Runnable[AgentState, AgentState], error) {
+func BuildGraph(ctx context.Context, arkConfig ArkConfig) (compose.Runnable[AgentState, AgentState], error) {
 	//获取chatModel
 	cm, err := NewChatModel(ctx, arkConfig)
 	if err != nil {

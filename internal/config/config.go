@@ -8,18 +8,15 @@ import (
 	"github.com/spf13/viper"
 	"github.com/wwwzy/CentAgent/internal/monitor"
 	"github.com/wwwzy/CentAgent/internal/storage"
+	"github.com/wwwzy/CentAgent/internal/agent"
 )
 
-type ArkConfig struct {
-	APIKey  string `mapstructure:"api_key"`
-	ModelID string `mapstructure:"model_id"`
-	BaseURL string `mapstructure:"base_url"`
-}
+
 
 type Config struct {
 	Storage  storage.Config `mapstructure:"storage"`
 	Monitor  monitor.Config `mapstructure:"monitor"`
-	Ark      ArkConfig      `mapstructure:"ark"`
+	Ark      agent.ArkConfig      `mapstructure:"ark"`
 	LogLevel string         `mapstructure:"log_level"`
 }
 

@@ -5,11 +5,10 @@ import (
 	"fmt"
 
 	"github.com/cloudwego/eino-ext/components/model/ark"
-	"github.com/wwwzy/CentAgent/internal/config"
 )
 
 // NewChatModel 初始化 Ark ChatModel
-func NewChatModel(ctx context.Context, arkConfig config.ArkConfig) (*ark.ChatModel, error) {
+func NewChatModel(ctx context.Context, arkConfig ArkConfig) (*ark.ChatModel, error) {
 	// 优先从环境变量读取配置，后续可改为从 config 包读取
 	apiKey := arkConfig.APIKey
 	modelID := arkConfig.ModelID

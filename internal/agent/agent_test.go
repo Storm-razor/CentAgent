@@ -2,10 +2,10 @@ package agent
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/cloudwego/eino/schema"
-	"github.com/wwwzy/CentAgent/internal/config"
 )
 
 // TestRealAgentGraphFlow 使用真实的 ChatModel 进行集成测试
@@ -13,16 +13,18 @@ import (
 // 如果未设置，测试将跳过
 func TestRealAgentGraphFlow(t *testing.T) {
 	// 1. 检查环境变量
-	cfg, err := config.Load("")
-	if err != nil {
-		t.Fatalf("Failed to load config: %v", err)
+	if os.Getenv("ARK_API_KEY") == "" || os.Getenv("ARK_MODEL_ID") == "" {
+		t.Fatalf("ARK_API_KEY or ARK_MODEL_ID not set, skipping real agent test")
 	}
 
 	ctx := context.Background()
 
 	// 2. 构建 Graph
 	// 直接使用 BuildGraph，它会调用 NewChatModel 初始化真实的 Ark 模型
-	runnable, err := BuildGraph(ctx, cfg.Ark)
+	runnable, err := BuildGraph(ctx, ArkConfig{
+		APIKey:  os.Getenv("ARK_API_KEY"),
+		ModelID: os.Getenv("ARK_MODEL_ID"),
+	})
 	if err != nil {
 		t.Fatalf("Failed to build graph: %v", err)
 	}

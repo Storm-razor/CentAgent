@@ -13,14 +13,14 @@ import (
 )
 
 type Config struct {
-	Path            string
-	InMemory        bool
-	EnableWAL       bool
-	BusyTimeout     time.Duration
-	MaxOpenConns    int
-	MaxIdleConns    int
-	ConnMaxLifetime time.Duration
-	Logger          logger.Interface
+	Path            string           `mapstructure:"path"`
+	InMemory        bool             `mapstructure:"in_memory"`
+	EnableWAL       bool             `mapstructure:"enable_wal"`
+	BusyTimeout     time.Duration    `mapstructure:"busy_timeout"`
+	MaxOpenConns    int              `mapstructure:"max_open_conns"`
+	MaxIdleConns    int              `mapstructure:"max_idle_conns"`
+	ConnMaxLifetime time.Duration    `mapstructure:"conn_max_lifetime"`
+	Logger          logger.Interface `mapstructure:"-"`
 }
 
 type Storage struct {

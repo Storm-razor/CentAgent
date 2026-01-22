@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/cloudwego/eino/compose"
+	"github.com/wwwzy/CentAgent/internal/config"
 )
 
 const (
@@ -14,9 +15,9 @@ const (
 )
 
 // BuildGraph 构建 Agent 的处理流程图
-func BuildGraph(ctx context.Context) (compose.Runnable[AgentState, AgentState], error) {
+func BuildGraph(ctx context.Context, arkConfig config.ArkConfig) (compose.Runnable[AgentState, AgentState], error) {
 	//获取chatModel
-	cm, err := NewChatModel(ctx)
+	cm, err := NewChatModel(ctx, arkConfig)
 	if err != nil {
 		return nil, fmt.Errorf("init chat model failed: %w", err)
 	}

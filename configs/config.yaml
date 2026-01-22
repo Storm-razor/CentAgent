@@ -1,0 +1,62 @@
+# CentAgent Configuration File
+# 默认配置文件路径: ~/.centagent/config.yaml 或 ./config.yaml
+
+# 日志级别 (debug, info, warn, error)
+log_level: "info"
+
+# Ark AI 配置 (推荐使用环境变量 ARK_API_KEY, ARK_MODEL_ID)
+ark:
+  # api_key: "your-api-key"
+  # model_id: "your-model-id"
+  base_url: "https://ark.cn-beijing.volces.com/api/v3"
+
+# 存储配置 (SQLite)
+storage:
+  # 数据库文件路径
+  path: "centagent.db"
+  # 忙碌超时时间
+  busy_timeout: "5s"
+  # 是否启用 WAL 模式 (推荐开启以提高并发性能)
+  enable_wal: true
+  # 连接池设置
+  max_open_conns: 1
+  max_idle_conns: 1
+
+# 监控配置
+monitor:
+  # 容器状态采集配置
+  stats:
+    enabled: true
+    interval: "30s"      # 采集周期
+    workers: 2           # 并发采集数
+    batch_size: 100      # 批量写入大小
+    flush_interval: "2s" # 写入最大等待时间
+
+  # 容器日志收集配置
+  logs:
+    enabled: true
+    queue_size: 1024
+    batch_size: 200
+    flush_interval: "2s"
+    max_line_bytes: 65536 # 64KB
+    tailer_limit: 50      # 最多同时收集多少个容器的日志
+    since_from_start: true # 仅收集启动后的新日志
+
+  # 数据清理配置 (Retention)
+  retention:
+    enabled: true        # 是否启用数据清理(推荐启动)
+    interval: "1h"       # 清理检查周期
+    
+    # 状态数据保留策略
+    stats:
+      keep_all: "12h"           # 12小时内数据全量保留
+      keep_anomaly_until: "120h" # 5天内仅保留异常数据 (CPU/Mem > 80%)
+      cpu_high: 80.0
+      mem_high: 80.0
+
+    # 日志数据保留策略
+    logs:
+      keep_all: "12h"            # 12小时内日志全量保留
+      keep_important_until: "120h" # 5天内仅保留重要日志
+      keep_levels: ["ERROR", "WARN"]
+      keep_sources: ["stderr"]

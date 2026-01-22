@@ -2,10 +2,10 @@ package agent
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/cloudwego/eino/schema"
+	"github.com/wwwzy/CentAgent/internal/config"
 )
 
 // TestRealAgentGraphFlow 使用真实的 ChatModel 进行集成测试
@@ -13,17 +13,16 @@ import (
 // 如果未设置，测试将跳过
 func TestRealAgentGraphFlow(t *testing.T) {
 	// 1. 检查环境变量
-	apiKey := os.Getenv("ARK_API_KEY")
-	modelID := os.Getenv("ARK_MODEL_ID")
-	if apiKey == "" || modelID == "" {
-		t.Skip("Skipping real agent test: ARK_API_KEY or ARK_MODEL_ID not set")
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatalf("Failed to load config: %v", err)
 	}
 
 	ctx := context.Background()
 
 	// 2. 构建 Graph
 	// 直接使用 BuildGraph，它会调用 NewChatModel 初始化真实的 Ark 模型
-	runnable, err := BuildGraph(ctx)
+	runnable, err := BuildGraph(ctx, cfg.Ark)
 	if err != nil {
 		t.Fatalf("Failed to build graph: %v", err)
 	}
@@ -66,7 +65,7 @@ func TestRealAgentGraphFlow(t *testing.T) {
 	if lastMsg.Role != schema.Assistant {
 		t.Errorf("Expected final message from Assistant, got %s", lastMsg.Role)
 	}
-	
+
 	// 验证是否真的触发了 Tool
 	hasToolCall := false
 	hasToolOutput := false

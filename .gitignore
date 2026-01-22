@@ -26,7 +26,7 @@ go.work.sum
 *.code-workspace
 
 # Project specific
-centagent
+# centagent
 centagent.exe
 *.log
 *.db
@@ -39,3 +39,7 @@ Thumbs.db
 # trae files
 *.trae
 .trae
+
+# db files
+*.db-shm
+*.db-wal

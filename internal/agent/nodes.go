@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/cloudwego/eino/components/model"
@@ -16,6 +17,28 @@ import (
 // 3. 调用 ChatModel 获取回复
 // 4. 更新 AgentState (追加 AI Message, 填充 ToolCalls)
 func ChatModelNode(ctx context.Context, state AgentState, chatModel model.ToolCallingChatModel) (AgentState, error) {
+	if state.Context == nil {
+		state.Context = map[string]interface{}{}
+	}
+
+	if awaiting, ok := state.Context[ConfirmAwaitingContextKey].(bool); ok && awaiting {
+		if granted, ok := state.Context[ConfirmGrantedContextKey].(bool); ok {
+			if granted {
+				if pending, ok := state.Context[ConfirmPendingContextKey].([]schema.ToolCall); ok && len(pending) > 0 {
+					state.NextStepToolCalls = pending
+					state.LatestToolOutputs = nil
+					delete(state.Context, ConfirmPendingContextKey)
+					delete(state.Context, ConfirmAwaitingContextKey)
+					delete(state.Context, ConfirmGrantedContextKey)
+					return state, nil
+				}
+			}
+			delete(state.Context, ConfirmPendingContextKey)
+			delete(state.Context, ConfirmAwaitingContextKey)
+			delete(state.Context, ConfirmGrantedContextKey)
+		}
+	}
+
 	// 1. 准备模板变量
 	// 这里的 key 必须与 NewChatTemplate 中的 MessagesPlaceholder 和变量名一致
 	// {os}, {arch}, {time} 是 SystemPromptTemplate 中的变量
@@ -56,6 +79,42 @@ func ChatModelNode(ctx context.Context, state AgentState, chatModel model.ToolCa
 	// 注意：ToolOutputs 已经在上一轮 Loop back 前被追加到了 Messages 中 (在 ToolsNode 中处理)
 	// 所以这里不需要再处理 ToolOutputs，只需要清理信号字段
 	state.LatestToolOutputs = nil
+
+	if enabled, ok := state.Context[ConfirmEnabledContextKey].(bool); ok && enabled && len(state.NextStepToolCalls) > 0 {
+		pendingCalls := state.NextStepToolCalls
+		toolNames := make([]string, 0, len(pendingCalls))
+		seen := make(map[string]struct{}, len(pendingCalls))
+		for _, tc := range pendingCalls {
+			name := strings.TrimSpace(tc.Function.Name)
+			if name == "" {
+				name = strings.TrimSpace(tc.Function.Name)
+			}
+			if name == "" {
+				continue
+			}
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			toolNames = append(toolNames, name)
+		}
+
+		state.Context[ConfirmPendingContextKey] = pendingCalls
+		state.Context[ConfirmAwaitingContextKey] = true
+		delete(state.Context, ConfirmGrantedContextKey)
+		state.NextStepToolCalls = nil
+
+		var summary string
+		if len(toolNames) > 0 {
+			summary = fmt.Sprintf("即将调用工具：%s。", strings.Join(toolNames, ", "))
+		} else {
+			summary = "即将调用工具。"
+		}
+		state.Messages = append(state.Messages, &schema.Message{
+			Role:    schema.Assistant,
+			Content: summary + "是否允许？输入 y/yes 继续，其他输入取消。",
+		})
+	}
 
 	return state, nil
 }

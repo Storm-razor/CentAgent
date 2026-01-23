@@ -14,7 +14,7 @@ import (
 func TestRealAgentGraphFlow(t *testing.T) {
 	// 1. 检查环境变量
 	if os.Getenv("ARK_API_KEY") == "" || os.Getenv("ARK_MODEL_ID") == "" {
-		t.Fatalf("ARK_API_KEY or ARK_MODEL_ID not set, skipping real agent test")
+		t.Skip("ARK_API_KEY 或 ARK_MODEL_ID 未设置，跳过真实 Agent 集成测试")
 	}
 
 	ctx := context.Background()

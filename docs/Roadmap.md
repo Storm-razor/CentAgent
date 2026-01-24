@@ -44,22 +44,25 @@
     - 在 CLI 中初始化 Eino Agent Graph。
     - 实现基础的控制台 REPL (Read-Eval-Print Loop) 用于调试对话逻辑。
 
-### Phase 3: 工程化增强 
+
+
+### Phase 3: TUI 终端界面 (The "Dashboard")
+**目标**: 引入 `Bubbletea` 实现设计文档中的现代化终端交互体验。
+
+1.  **TUI 框架**:
+    - 创建 `internal/ui`（UI 抽象接口）与 `internal/tui`（Bubbletea 实现）包，确保 UI 可插拔。
+2.  **Chat UI**:
+    - 实现“思考中”状态动画 (Thinking...)。
+    - 实现 Markdown 消息流式渲染。
+    - 实现 Tool 调用前的“用户决策确认”组件 (Yes/No 表单)。
+    - 使用对话框UI分离AI与用户信息
+    - 实现用户输入框与发送按钮
+
+### Phase 4: 工程化增强 
 1. **审计/可追溯**：
    - 将每次 tool 调用（名称、参数、结果摘要、耗时、是否被用户确认）写入 storage 的 Audit（库里已有 Audit 相关接口但尚未接线，见 repository.go ）。
 2.  **“从 DB 查监控数据”的工具**：
    - Phase 2 先用 Docker tools 闭环，后续再把 QueryContainerStats/Logs 暴露为 tool，形成“实时 Docker + 历史 DB”的组合能力（更贴近 Agent 问答）
 
-### Phase 4: TUI 终端界面 (The "Dashboard")
-**目标**: 引入 `Bubbletea` 实现设计文档中的现代化终端交互体验。
-
-1.  **TUI 框架**:
-    - 创建 `internal/tui` 包。
-2.  **Chat UI**:
-    - 实现“思考中”状态动画 (Thinking...)。
-    - 实现 Markdown 消息流式渲染。
-    - 实现 Tool 调用前的“用户决策确认”组件 (Yes/No 表单)。
-
 ---
-
 

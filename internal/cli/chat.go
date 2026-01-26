@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/wwwzy/CentAgent/internal/agent"
 	"github.com/wwwzy/CentAgent/internal/docker"
+	"github.com/wwwzy/CentAgent/internal/storage"
 	"github.com/wwwzy/CentAgent/internal/tui"
 	"github.com/wwwzy/CentAgent/internal/ui"
 )
@@ -37,7 +38,13 @@ var chatCmd = &cobra.Command{
 			return fmt.Errorf("连接 docker 失败: %w", err)
 		}
 
-		runnable, err := agent.BuildGraph(ctx, cfg.Ark)
+		store, err := storage.Open(ctx, cfg.Storage)
+		if err != nil {
+			return fmt.Errorf("打开存储失败: %w", err)
+		}
+		defer store.Close()
+
+		runnable, err := agent.BuildGraph(ctx, cfg.Ark, store)
 		if err != nil {
 			return fmt.Errorf("构建 Agent Graph 失败: %w", err)
 		}

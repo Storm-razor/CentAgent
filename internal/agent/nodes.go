@@ -105,7 +105,25 @@ func ChatModelNode(ctx context.Context, state AgentState, chatModel model.ToolCa
 		state.NextStepToolCalls = nil
 
 		var summary string
-		if len(toolNames) > 0 {
+		if len(pendingCalls) > 0 {
+			lines := make([]string, 0, len(pendingCalls))
+			for _, tc := range pendingCalls {
+				name := strings.TrimSpace(tc.Function.Name)
+				if name == "" {
+					name = "未知工具"
+				}
+				args := strings.TrimSpace(tc.Function.Arguments)
+				if args == "" {
+					lines = append(lines, fmt.Sprintf("%s", name))
+					continue
+				}
+				if len(args) > 800 {
+					args = args[:800] + "...(truncated)"
+				}
+				lines = append(lines, fmt.Sprintf("%s 参数: %s", name, args))
+			}
+			summary = "即将调用工具：\n" + strings.Join(lines, "\n")
+		} else if len(toolNames) > 0 {
 			summary = fmt.Sprintf("即将调用工具：%s。", strings.Join(toolNames, ", "))
 		} else {
 			summary = "即将调用工具。"

@@ -36,7 +36,7 @@ func init() {
 	// 在这里定义您的标志和配置设置。
 	// Cobra 支持持久标志，如果在定义在这里，
 	// 将对您的应用程序全局有效。
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "配置文件 (默认为 ./configs/config.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "配置文件（默认按 ./config.yaml、./configs/config.yaml、$HOME/.centagent/config.yaml 搜索）")
 }
 
 // initConfig 读取配置文件和环境变量（如果已设置）。

@@ -24,7 +24,7 @@ func TestRealAgentGraphFlow(t *testing.T) {
 	runnable, err := BuildGraph(ctx, ArkConfig{
 		APIKey:  os.Getenv("ARK_API_KEY"),
 		ModelID: os.Getenv("ARK_MODEL_ID"),
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("Failed to build graph: %v", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/cloudwego/eino/compose"
+	"github.com/wwwzy/CentAgent/internal/storage"
 )
 
 const (
@@ -20,7 +21,7 @@ type ArkConfig struct {
 }
 
 // BuildGraph 构建 Agent 的处理流程图
-func BuildGraph(ctx context.Context, arkConfig ArkConfig) (compose.Runnable[AgentState, AgentState], error) {
+func BuildGraph(ctx context.Context, arkConfig ArkConfig, store *storage.Storage) (compose.Runnable[AgentState, AgentState], error) {
 	//获取chatModel
 	cm, err := NewChatModel(ctx, arkConfig)
 	if err != nil {
@@ -42,14 +43,17 @@ func BuildGraph(ctx context.Context, arkConfig ArkConfig) (compose.Runnable[Agen
 
 	// ToolsNode: 工具执行节点
 	// 创建 ToolsNode
-	tools := GetTools()
+	tools := GetTools(store)
 	tn, err := NewToolsNode(ctx, &compose.ToolsNodeConfig{Tools: tools})
 	if err != nil {
 		return nil, fmt.Errorf("create tools node failed: %w", err)
 	}
 
 	// 将工具信息添加到chatModel
-	toolsInfo, err := GetToolsInfo(ctx)
+	toolsInfo, err := GetToolsInfo(ctx, store)
+	if err != nil {
+		return nil, fmt.Errorf("get tools info failed: %w", err)
+	}
 	err = cm.BindTools(toolsInfo)
 	if err != nil {
 		return nil, fmt.Errorf("bind tools to chat model failed: %w", err)

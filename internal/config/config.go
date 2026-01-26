@@ -6,21 +6,17 @@ import (
 	"time"
 
 	"github.com/spf13/viper"
+	"github.com/wwwzy/CentAgent/internal/agent"
 	"github.com/wwwzy/CentAgent/internal/monitor"
 	"github.com/wwwzy/CentAgent/internal/storage"
-	"github.com/wwwzy/CentAgent/internal/agent"
 )
 
-
-
 type Config struct {
-	Storage  storage.Config `mapstructure:"storage"`
-	Monitor  monitor.Config `mapstructure:"monitor"`
-	Ark      agent.ArkConfig      `mapstructure:"ark"`
-	LogLevel string         `mapstructure:"log_level"`
+	Storage  storage.Config  `mapstructure:"storage"`
+	Monitor  monitor.Config  `mapstructure:"monitor"`
+	Ark      agent.ArkConfig `mapstructure:"ark"`
+	LogLevel string          `mapstructure:"log_level"`
 }
-
-
 
 func Load(cfgFile string) (*Config, error) {
 	// 1. 初始化 Viper
@@ -31,6 +27,7 @@ func Load(cfgFile string) (*Config, error) {
 	} else {
 		// 默认搜索路径
 		v.AddConfigPath(".")
+		v.AddConfigPath("./configs")
 		v.AddConfigPath("$HOME/.centagent")
 		v.SetConfigName("config")
 		v.SetConfigType("yaml")

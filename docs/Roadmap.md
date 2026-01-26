@@ -62,7 +62,12 @@
 1. **审计/可追溯**：
    - 将每次 tool 调用（名称、参数、结果摘要、耗时、是否被用户确认）写入 storage 的 Audit（库里已有 Audit 相关接口但尚未接线，见 repository.go ）。
 2.  **“从 DB 查监控数据”的工具**：
-   - Phase 2 先用 Docker tools 闭环，后续再把 QueryContainerStats/Logs 暴露为 tool，形成“实时 Docker + 历史 DB”的组合能力（更贴近 Agent 问答）
+   - Phase 2 先用 Docker tools 闭环，后续再把 QueryContainerStats/Logs 暴露为 tool，形成“实时 Docker + 历史 DB”的组合能力（更贴近 Agent 问答场景）。
+3 . **优化命令参数**： 
+   - 拓展命令类型,提高灵活度
 
+### Phase 5: 优化token处理
+
+### Phase 6: 完善文档与测试
 ---
 

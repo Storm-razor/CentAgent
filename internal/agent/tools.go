@@ -4,10 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"github.com/wwwzy/CentAgent/internal/docker"
+	"github.com/wwwzy/CentAgent/internal/storage"
+)
+
+const (
+	maxStatsRowsPerTool = 200
+	maxLogsRowsPerTool  = 200
 )
 
 // ListContainersTool 列出容器
@@ -879,9 +888,374 @@ func (t *RemoveVolumeTool) InvokableRun(ctx context.Context, argumentsInJSON str
 	return fmt.Sprintf("Volume %s removed successfully", args.Name), nil
 }
 
+type QueryContainerStatsTool struct {
+	store *storage.Storage
+}
+
+func (t *QueryContainerStatsTool) Info(_ context.Context) (*schema.ToolInfo, error) {
+	return &schema.ToolInfo{
+		Name: "query_container_stats",
+		Desc: "Query a small slice of historical container stats from the CentAgent database. This tool is designed to be called multiple times with different time windows or limits to avoid fetching too much data at once.",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"container_id": {
+				Desc:     "Optional container ID to filter (exact match)",
+				Type:     schema.String,
+				Required: false,
+			},
+			"container_name": {
+				Desc:     "Optional container name to filter (exact match)",
+				Type:     schema.String,
+				Required: false,
+			},
+			"from": {
+				Desc:     "Optional start time (RFC3339) or duration like 10m/1h (means now-10m/now-1h)",
+				Type:     schema.String,
+				Required: false,
+			},
+			"to": {
+				Desc:     "Optional end time (RFC3339) or duration like 10m/1h (means now-10m/now-1h)",
+				Type:     schema.String,
+				Required: false,
+			},
+			"limit": {
+				Desc:     "Limit the number of rows returned (default 200, max 200). Use multiple calls with different time ranges for more data.",
+				Type:     schema.Integer,
+				Required: false,
+			},
+			"desc": {
+				Desc:     "Sort by collected_at descending (latest first)",
+				Type:     schema.Boolean,
+				Required: false,
+			},
+		}),
+	}, nil
+}
+
+func (t *QueryContainerStatsTool) InvokableRun(ctx context.Context, argumentsInJSON string, _ ...tool.Option) (string, error) {
+	if t == nil || t.store == nil {
+		return "", fmt.Errorf("storage not initialized")
+	}
+	var args struct {
+		ContainerID   string `json:"container_id"`
+		ContainerName string `json:"container_name"`
+		From          string `json:"from"`
+		To            string `json:"to"`
+		Limit         int    `json:"limit"`
+		Desc          bool   `json:"desc"`
+	}
+	if err := json.Unmarshal([]byte(argumentsInJSON), &args); err != nil {
+		return "", fmt.Errorf("invalid arguments: %w", err)
+	}
+
+	normalizedContainerID := strings.TrimSpace(args.ContainerID)
+	normalizedContainerName := strings.TrimSpace(args.ContainerName)
+	limit := args.Limit
+	if limit <= 0 || limit > maxStatsRowsPerTool {
+		limit = maxStatsRowsPerTool
+	}
+	q := storage.StatsQuery{
+		ContainerID:   normalizedContainerID,
+		ContainerName: normalizedContainerName,
+		Limit:         limit,
+		Desc:          args.Desc,
+	}
+	if s := strings.TrimSpace(args.From); s != "" {
+		tm, err := parseTimeArg(s, time.Now().UTC())
+		if err != nil {
+			return "", err
+		}
+		q.From = &tm
+	}
+	if s := strings.TrimSpace(args.To); s != "" {
+		tm, err := parseTimeArg(s, time.Now().UTC())
+		if err != nil {
+			return "", err
+		}
+		q.To = &tm
+	}
+
+	stats, err := t.queryStatsWithFallback(ctx, q)
+	if err != nil {
+		return "", err
+	}
+	data, err := json.Marshal(stats)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal result: %w", err)
+	}
+	return string(data), nil
+}
+
+func (t *QueryContainerStatsTool) queryStatsWithFallback(ctx context.Context, q storage.StatsQuery) ([]storage.ContainerStat, error) {
+	candidatesID := containerIDCandidates(q.ContainerID)
+	candidatesName := containerNameCandidates(q.ContainerName)
+
+	if len(candidatesID) == 0 && len(candidatesName) == 0 {
+		return t.store.QueryContainerStats(ctx, q)
+	}
+
+	if len(candidatesID) == 0 {
+		candidatesID = []string{""}
+	}
+	if len(candidatesName) == 0 {
+		candidatesName = []string{""}
+	}
+
+	var lastErr error
+	for _, id := range candidatesID {
+		for _, name := range candidatesName {
+			try := q
+			try.ContainerID = id
+			try.ContainerName = name
+			out, err := t.store.QueryContainerStats(ctx, try)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			if len(out) > 0 {
+				return out, nil
+			}
+		}
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return []storage.ContainerStat{}, nil
+}
+
+type QueryContainerLogsTool struct {
+	store *storage.Storage
+}
+
+func (t *QueryContainerLogsTool) Info(_ context.Context) (*schema.ToolInfo, error) {
+	return &schema.ToolInfo{
+		Name: "query_container_logs",
+		Desc: "Query a small slice of historical container logs from the CentAgent database. This tool is designed to be called multiple times with different time windows or limits to avoid fetching too much data at once.",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"container_id": {
+				Desc:     "Optional container ID to filter (exact match)",
+				Type:     schema.String,
+				Required: false,
+			},
+			"container_name": {
+				Desc:     "Optional container name to filter (exact match)",
+				Type:     schema.String,
+				Required: false,
+			},
+			"from": {
+				Desc:     "Optional start time (RFC3339) or duration like 10m/1h (means now-10m/now-1h)",
+				Type:     schema.String,
+				Required: false,
+			},
+			"to": {
+				Desc:     "Optional end time (RFC3339) or duration like 10m/1h (means now-10m/now-1h)",
+				Type:     schema.String,
+				Required: false,
+			},
+			"level": {
+				Desc:     "Optional log level to filter (exact match, e.g. ERROR/WARN/INFO)",
+				Type:     schema.String,
+				Required: false,
+			},
+			"source": {
+				Desc:     "Optional log source to filter (exact match, e.g. stdout/stderr)",
+				Type:     schema.String,
+				Required: false,
+			},
+			"contains": {
+				Desc:     "Optional substring to search within message (SQL LIKE)",
+				Type:     schema.String,
+				Required: false,
+			},
+			"limit": {
+				Desc:     "Limit the number of rows returned (default 200, max 200). Use multiple calls with different time ranges for more data.",
+				Type:     schema.Integer,
+				Required: false,
+			},
+			"desc": {
+				Desc:     "Sort by timestamp descending (latest first)",
+				Type:     schema.Boolean,
+				Required: false,
+			},
+		}),
+	}, nil
+}
+
+func (t *QueryContainerLogsTool) InvokableRun(ctx context.Context, argumentsInJSON string, _ ...tool.Option) (string, error) {
+	if t == nil || t.store == nil {
+		return "", fmt.Errorf("storage not initialized")
+	}
+	var args struct {
+		ContainerID   string `json:"container_id"`
+		ContainerName string `json:"container_name"`
+		From          string `json:"from"`
+		To            string `json:"to"`
+		Level         string `json:"level"`
+		Source        string `json:"source"`
+		Contains      string `json:"contains"`
+		Limit         int    `json:"limit"`
+		Desc          bool   `json:"desc"`
+	}
+	if err := json.Unmarshal([]byte(argumentsInJSON), &args); err != nil {
+		return "", fmt.Errorf("invalid arguments: %w", err)
+	}
+
+	normalizedContainerID := strings.TrimSpace(args.ContainerID)
+	normalizedContainerName := strings.TrimSpace(args.ContainerName)
+
+	limit := args.Limit
+	if limit <= 0 || limit > maxLogsRowsPerTool {
+		limit = maxLogsRowsPerTool
+	}
+
+	q := storage.LogQuery{
+		ContainerID:   normalizedContainerID,
+		ContainerName: normalizedContainerName,
+		Level:         strings.TrimSpace(args.Level),
+		Source:        strings.TrimSpace(args.Source),
+		Contains:      strings.TrimSpace(args.Contains),
+		Limit:         limit,
+		Desc:          args.Desc,
+	}
+	if s := strings.TrimSpace(args.From); s != "" {
+		tm, err := parseTimeArg(s, time.Now().UTC())
+		if err != nil {
+			return "", err
+		}
+		q.From = &tm
+	}
+	if s := strings.TrimSpace(args.To); s != "" {
+		tm, err := parseTimeArg(s, time.Now().UTC())
+		if err != nil {
+			return "", err
+		}
+		q.To = &tm
+	}
+
+	logs, err := t.queryLogsWithFallback(ctx, q)
+	if err != nil {
+		return "", err
+	}
+	data, err := json.Marshal(logs)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal result: %w", err)
+	}
+	return string(data), nil
+}
+
+func (t *QueryContainerLogsTool) queryLogsWithFallback(ctx context.Context, q storage.LogQuery) ([]storage.ContainerLog, error) {
+	candidatesID := containerIDCandidates(q.ContainerID)
+	candidatesName := containerNameCandidates(q.ContainerName)
+
+	if len(candidatesID) == 0 && len(candidatesName) == 0 {
+		return t.store.QueryContainerLogs(ctx, q)
+	}
+
+	if len(candidatesID) == 0 {
+		candidatesID = []string{""}
+	}
+	if len(candidatesName) == 0 {
+		candidatesName = []string{""}
+	}
+
+	var lastErr error
+	for _, id := range candidatesID {
+		for _, name := range candidatesName {
+			try := q
+			try.ContainerID = id
+			try.ContainerName = name
+			out, err := t.store.QueryContainerLogs(ctx, try)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			if len(out) > 0 {
+				return out, nil
+			}
+		}
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return []storage.ContainerLog{}, nil
+}
+
+func parseTimeArg(s string, now time.Time) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, fmt.Errorf("time string is empty")
+	}
+	if d, err := time.ParseDuration(s); err == nil {
+		if d > 0 {
+			d = -d
+		}
+		return now.Add(d).UTC(), nil
+	}
+	if tm, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return tm.UTC(), nil
+	}
+	if tm, err := time.Parse(time.RFC3339, s); err == nil {
+		return tm.UTC(), nil
+	}
+	if sec, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return time.Unix(sec, 0).UTC(), nil
+	}
+	return time.Time{}, fmt.Errorf("invalid time format: %s (use RFC3339 or duration like 10m)", s)
+}
+
+func containerNameCandidates(name string) []string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil
+	}
+	base := strings.TrimPrefix(name, "/")
+	out := make([]string, 0, 2)
+	seen := map[string]struct{}{}
+
+	add := func(s string) {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return
+		}
+		if _, ok := seen[s]; ok {
+			return
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+
+	add(name)
+	add(base)
+	add("/" + base)
+	return out
+}
+
+func containerIDCandidates(id string) []string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
+	out := make([]string, 0, 2)
+	seen := map[string]struct{}{}
+	add := func(s string) {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return
+		}
+		if _, ok := seen[s]; ok {
+			return
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	add(id)
+	if len(id) > 12 {
+		add(id[:12])
+	}
+	return out
+}
+
 // GetTools 返回所有可用的工具列表
-func GetTools() []tool.BaseTool {
-	return []tool.BaseTool{
+func GetTools(store *storage.Storage) []tool.BaseTool {
+	tools := []tool.BaseTool{
 		&ListContainersTool{},
 		&InspectContainerTool{},
 		&GetContainerLogsTool{},
@@ -904,10 +1278,14 @@ func GetTools() []tool.BaseTool {
 		&InspectVolumeTool{},
 		&RemoveVolumeTool{},
 	}
+	if store != nil {
+		tools = append(tools, &QueryContainerStatsTool{store: store}, &QueryContainerLogsTool{store: store})
+	}
+	return tools
 }
 
-func GetToolsInfo(ctx context.Context) ([]*schema.ToolInfo, error) {
-	tools := GetTools()
+func GetToolsInfo(ctx context.Context, store *storage.Storage) ([]*schema.ToolInfo, error) {
+	tools := GetTools(store)
 	toolInfos := make([]*schema.ToolInfo, 0, len(tools))
 	for _, t := range tools {
 		info, err := t.Info(ctx)

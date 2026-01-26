@@ -20,6 +20,11 @@ type GetContainerLogsOptions struct {
 
 // GetContainerLogs 获取容器日志 (stdout + stderr)
 func GetContainerLogs(ctx context.Context, opts GetContainerLogsOptions) (string, error) {
+	tty := false
+	if info, err := InspectContainer(ctx, opts.ContainerID); err == nil && info != nil && info.Config != nil {
+		tty = info.Config.Tty
+	}
+
 	cli, err := GetClient()
 	if err != nil {
 		return "", err
@@ -43,16 +48,22 @@ func GetContainerLogs(ctx context.Context, opts GetContainerLogsOptions) (string
 	}
 	defer reader.Close()
 
-	var outBuf, errBuf strings.Builder
+	var result string
+	if tty {
+		body, err := io.ReadAll(reader)
+		if err != nil {
+			return "", fmt.Errorf("failed to read logs for %s: %w", opts.ContainerID, err)
+		}
+		result = fmt.Sprintf("=== LOGS ===\n%s", string(body))
+	} else {
+		var outBuf, errBuf strings.Builder
 
-	// 尝试解析多路复用流
-	_, err = stdcopy.StdCopy(&outBuf, &errBuf, reader)
-	if err != nil {
-		// 如果失败（例如 tty=true），则直接读取
-		return "", fmt.Errorf("stdcopy failed (container might be using TTY): %w", err)
+		// 仅在非 TTY 容器上使用 stdcopy 解析多路复用流
+		if _, err := stdcopy.StdCopy(&outBuf, &errBuf, reader); err != nil {
+			return "", fmt.Errorf("stdcopy failed for %s: %w", opts.ContainerID, err)
+		}
+		result = fmt.Sprintf("=== STDOUT ===\n%s\n=== STDERR ===\n%s", outBuf.String(), errBuf.String())
 	}
-
-	result := fmt.Sprintf("=== STDOUT ===\n%s\n=== STDERR ===\n%s", outBuf.String(), errBuf.String())
 
 	// 简单的截断保护
 	if len(result) > 10000 {

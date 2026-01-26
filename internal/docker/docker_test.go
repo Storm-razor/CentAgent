@@ -256,3 +256,188 @@ func TestGetContainerLogs(t *testing.T) {
 		t.Logf("Got logs (len=%d):\n%s", len(logs), logs)
 	}
 }
+
+func TestListImages(t *testing.T) {
+	requireDocker(t)
+
+	ctx := context.Background()
+	images, err := ListImages(ctx, ListImagesOptions{All: false})
+	if err != nil {
+		t.Fatalf("ListImages failed: %v", err)
+	}
+	t.Logf("Found %d images", len(images))
+}
+
+func TestInspectImage(t *testing.T) {
+	requireDocker(t)
+
+	ctx := context.Background()
+	images, err := ListImages(ctx, ListImagesOptions{All: false})
+	if err != nil {
+		t.Fatalf("ListImages failed: %v", err)
+	}
+	if len(images) == 0 {
+		t.Skip("no local images to inspect")
+	}
+
+	var ref string
+	for _, img := range images {
+		for _, tag := range img.RepoTags {
+			if tag != "" && tag != "<none>:<none>" {
+				ref = tag
+				break
+			}
+		}
+		if ref != "" {
+			break
+		}
+	}
+	if ref == "" {
+		t.Skip("no tagged image to inspect")
+	}
+
+	info, err := InspectImage(ctx, ref)
+	if err != nil {
+		t.Fatalf("InspectImage failed: %v", err)
+	}
+	if info.ID == "" {
+		t.Fatalf("InspectImage returned empty ID for %s", ref)
+	}
+	t.Logf("Inspected image %s: id=%s size=%d", ref, info.ID, info.Size)
+}
+
+func TestVolumeLifecycle(t *testing.T) {
+	requireDocker(t)
+
+	ctx := context.Background()
+	name := fmt.Sprintf("centagent-test-vol-%d", time.Now().UnixNano())
+
+	created, err := CreateVolume(ctx, CreateVolumeOptions{
+		Name:   name,
+		Driver: "local",
+		Labels: map[string]string{"centagent_test": "true"},
+	})
+	if err != nil {
+		t.Fatalf("CreateVolume failed: %v", err)
+	}
+	if created.Name != name {
+		t.Fatalf("CreateVolume expected name %s, got %s", name, created.Name)
+	}
+
+	inspected, err := InspectVolume(ctx, name)
+	if err != nil {
+		_ = RemoveVolume(ctx, name, RemoveVolumeOptions{Force: true})
+		t.Fatalf("InspectVolume failed: %v", err)
+	}
+	if inspected.Name != name {
+		_ = RemoveVolume(ctx, name, RemoveVolumeOptions{Force: true})
+		t.Fatalf("InspectVolume expected name %s, got %s", name, inspected.Name)
+	}
+
+	if inspected.Labels["centagent_test"] != "true" {
+		_ = RemoveVolume(ctx, name, RemoveVolumeOptions{Force: true})
+		t.Fatalf("InspectVolume expected label centagent_test=true, got %v", inspected.Labels)
+	}
+
+	if err := RemoveVolume(ctx, name, RemoveVolumeOptions{Force: true}); err != nil {
+		t.Fatalf("RemoveVolume failed: %v", err)
+	}
+}
+
+func TestNetworkLifecycle(t *testing.T) {
+	requireDocker(t)
+
+	ctx := context.Background()
+	name := fmt.Sprintf("centagent-test-net-%d", time.Now().UnixNano())
+
+	created, err := CreateNetwork(ctx, CreateNetworkOptions{
+		Name:       name,
+		Driver:     "bridge",
+		Attachable: true,
+		Labels:     map[string]string{"centagent_test": "true"},
+	})
+	if err != nil {
+		t.Fatalf("CreateNetwork failed: %v", err)
+	}
+
+	info, err := InspectNetwork(ctx, created.ID)
+	if err != nil {
+		_ = RemoveNetwork(ctx, created.ID)
+		t.Fatalf("InspectNetwork failed: %v", err)
+	}
+	if info.Name != name {
+		_ = RemoveNetwork(ctx, created.ID)
+		t.Fatalf("InspectNetwork expected name %s, got %s", name, info.Name)
+	}
+
+	if err := RemoveNetwork(ctx, created.ID); err != nil {
+		t.Fatalf("RemoveNetwork failed: %v", err)
+	}
+}
+
+func TestRunContainerFromImage(t *testing.T) {
+	requireDocker(t)
+
+	ctx := context.Background()
+	cli, err := GetClient()
+	if err != nil {
+		t.Skipf("Failed to get docker client: %v", err)
+	}
+
+	images, err := cli.ImageList(ctx, image.ListOptions{All: false})
+	if err != nil || len(images) == 0 {
+		t.Skip("no local images to run a container")
+	}
+
+	var imageName string
+	for _, img := range images {
+		for _, tag := range img.RepoTags {
+			if tag == "" || tag == "<none>:<none>" {
+				continue
+			}
+			if strings.Contains(tag, "alpine") || strings.Contains(tag, "busybox") {
+				imageName = tag
+				break
+			}
+		}
+		if imageName != "" && strings.Contains(imageName, "nginx") {
+			break
+		}
+	}
+	if imageName == "" {
+		t.Skip("no suitable tagged image found to run a container")
+	}
+
+	name := fmt.Sprintf("centagent-run-%d", time.Now().UnixNano())
+	runOpts := RunContainerFromImageOptions{
+		Image:         imageName,
+		Name:          name,
+		AutoRemove:    false,
+		PullIfMissing: false,
+	}
+	if !strings.Contains(imageName, "nginx") {
+		runOpts.Cmd = []string{"sh", "-c", "sleep 600"}
+	}
+
+	res, err := RunContainerFromImage(ctx, runOpts)
+	if err != nil {
+		t.Fatalf("RunContainerFromImage failed: %v", err)
+	}
+	if res == nil || res.ContainerID == "" {
+		t.Fatalf("RunContainerFromImage returned empty container id: %+v", res)
+	}
+	t.Logf("Started container id=%s name=%s", res.ContainerID, res.Name)
+
+	defer func() {
+		_ = cli.ContainerStop(ctx, res.ContainerID, container.StopOptions{})
+		_ = cli.ContainerRemove(ctx, res.ContainerID, container.RemoveOptions{Force: true})
+	}()
+
+	info, err := InspectContainer(ctx, res.ContainerID)
+	if err != nil {
+		t.Fatalf("InspectContainer failed: %v", err)
+	}
+	if info.State == nil || info.State.Status != "running" {
+		t.Fatalf("expected container running, got state=%v", info.State)
+	}
+}

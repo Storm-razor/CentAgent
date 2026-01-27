@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/cloudwego/eino/schema"
+	"github.com/google/uuid"
 	"github.com/wwwzy/CentAgent/internal/agent"
 	"github.com/wwwzy/CentAgent/internal/ui"
 )
@@ -270,6 +271,11 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			m.input.SetValue("")
 			m.thinking = true
+
+			// 每次新用户查询生成一个 TraceID 并注入 Context
+			traceID := uuid.New().String()
+			m.ctx = agent.WithTraceID(m.ctx, traceID)
+
 			prev := len(m.state.Messages)
 			m.lastInvokePrevCount = prev
 			return m, tea.Batch(cmd, invokeBackend(m.ctx, m.backend, m.state, prev))

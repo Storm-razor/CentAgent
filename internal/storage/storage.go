@@ -108,6 +108,18 @@ func (s *Storage) Migrate(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return errors.New("storage not initialized")
 	}
+
+	// 临时修复：由于 AuditRecord 移除了 Actor 字段，但 SQLite 的 AutoMigrate 不会删除旧列/约束
+	// 导致 NOT NULL constraint failed。这里检查如果表存在且有 actor 列，则重建表。
+	if s.db.Migrator().HasTable(&AuditRecord{}) {
+		if s.db.Migrator().HasColumn(&AuditRecord{}, "actor") {
+			// 发现旧列，重建表
+			if err := s.db.Migrator().DropTable(&AuditRecord{}); err != nil {
+				return fmt.Errorf("drop old audit_records table: %w", err)
+			}
+		}
+	}
+
 	if err := s.db.WithContext(ctx).AutoMigrate(
 		&ContainerStat{},
 		&ContainerLog{},

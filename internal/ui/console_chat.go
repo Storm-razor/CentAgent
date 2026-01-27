@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/cloudwego/eino/schema"
+	"github.com/google/uuid"
 	"github.com/wwwzy/CentAgent/internal/agent"
 )
 
@@ -79,6 +80,18 @@ func (u *ConsoleChatUI) Run(ctx context.Context, backend ChatBackend, initial ag
 				return nil
 			}
 			state.UserQuery = line
+
+			// 每次新用户查询生成一个 TraceID
+			state.Context[agent.ConfirmEnabledContextKey] = opts.ConfirmTools
+			traceID := uuid.New().String()
+			// 将 TraceID 注入 context
+			ctx = agent.WithTraceID(ctx, traceID)
+			// 注意：agent state 的 Context 主要是用于 Eino 内部传递，
+			// 而 tool 的 InvokableRun 接收的是 ctx 参数。
+			// 为了保险起见，我们也可以在 agent state 的 context 里放一份，
+			// 但 Eino graph 节点传递 context 的机制是主要的。
+			// 不过 Eino 每次 Invoke 可能会重置 context，所以这里修改 ctx 是对的，
+			// 只要 backend.Invoke 传递了这个 ctx。
 		}
 
 		var err error

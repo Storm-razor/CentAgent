@@ -261,13 +261,10 @@ func TestAuditInsertQueryUpdate(t *testing.T) {
 	ctx := context.Background()
 
 	rec := AuditRecord{
-		TraceID:    "trace-1",
-		Actor:      "agent",
-		Action:     "docker.ps",
-		TargetType: "docker",
-		TargetID:   "local",
-		Status:     "running",
-		StartedAt:  time.Now().Add(-1 * time.Second).UTC(),
+		TraceID:   "trace-1",
+		Action:    "docker.ps",
+		Status:    "running",
+		StartedAt: time.Now().Add(-1 * time.Second).UTC(),
 	}
 	if err := s.InsertAuditRecord(ctx, &rec); err != nil {
 		t.Fatalf("insert audit: %v", err)

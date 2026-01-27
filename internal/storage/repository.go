@@ -359,13 +359,8 @@ func (s *Storage) DeleteContainerLogsUnimportantInRangeLimited(ctx context.Conte
 type AuditQuery struct {
 	// TraceID 精确匹配链路 ID。
 	TraceID string
-	// Actor 精确匹配发起方。
-	Actor string
 	// Action 精确匹配动作名（建议为稳定的工具名/命令名）。
 	Action string
-	// TargetType/TargetID 精确匹配被作用对象类型/标识。
-	TargetType string
-	TargetID   string
 	// Status 精确匹配执行状态（例如 running/success/failed）。
 	Status string
 	// From/To 过滤 CreatedAt 区间：[From, To]（两端包含）。
@@ -404,17 +399,8 @@ func (s *Storage) QueryAuditRecords(ctx context.Context, q AuditQuery) ([]AuditR
 	if q.TraceID != "" {
 		db = db.Where("trace_id = ?", q.TraceID)
 	}
-	if q.Actor != "" {
-		db = db.Where("actor = ?", q.Actor)
-	}
 	if q.Action != "" {
 		db = db.Where("action = ?", q.Action)
-	}
-	if q.TargetType != "" {
-		db = db.Where("target_type = ?", q.TargetType)
-	}
-	if q.TargetID != "" {
-		db = db.Where("target_id = ?", q.TargetID)
 	}
 	if q.Status != "" {
 		db = db.Where("status = ?", q.Status)
@@ -446,24 +432,25 @@ type AuditUpdate struct {
 	FinishedAt   *time.Time
 }
 
-func (s *Storage) UpdateAuditRecord(ctx context.Context, id uint64, upd AuditUpdate) error {
+func (s *Storage) UpdateAuditRecord(ctx context.Context, id uint64, up AuditUpdate) error {
 	if s == nil || s.db == nil {
 		return errors.New("storage not initialized")
 	}
 
-	updates := map[string]any{}
-	if upd.Status != nil {
-		updates["status"] = *upd.Status
+	updates := make(map[string]interface{})
+	if up.Status != nil {
+		updates["status"] = *up.Status
 	}
-	if upd.ResultJSON != nil {
-		updates["result_json"] = *upd.ResultJSON
+	if up.ResultJSON != nil {
+		updates["result_json"] = *up.ResultJSON
 	}
-	if upd.ErrorMessage != nil {
-		updates["error_message"] = *upd.ErrorMessage
+	if up.ErrorMessage != nil {
+		updates["error_message"] = *up.ErrorMessage
 	}
-	if upd.FinishedAt != nil {
-		updates["finished_at"] = *upd.FinishedAt
+	if up.FinishedAt != nil {
+		updates["finished_at"] = *up.FinishedAt
 	}
+
 	if len(updates) == 0 {
 		return nil
 	}

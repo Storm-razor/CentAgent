@@ -62,4 +62,29 @@ func main() {
 			}
 		}
 	}
+
+	fmt.Println("\n------------------------------------")
+
+	// Verify AuditRecords
+	var auditCount int64
+	if !db.Migrator().HasTable(&storage.AuditRecord{}) {
+		fmt.Println("Table 'audit_records' does not exist yet.")
+	} else {
+		db.Model(&storage.AuditRecord{}).Count(&auditCount)
+		fmt.Printf("Total Audit Records: %d\n", auditCount)
+
+		if auditCount > 0 {
+			var audits []storage.AuditRecord
+			db.Order("created_at desc").Limit(5).Find(&audits)
+			fmt.Println("Latest 5 Audit Records (Local Time):")
+			for _, a := range audits {
+				params := a.ParamsJSON
+				if len(params) > 50 {
+					params = params[:47] + "..."
+				}
+				fmt.Printf("  [%s] TraceID:%s Action:%s Status:%s Params:%s\n",
+					a.CreatedAt.Local().Format("2006-01-02 15:04:05"), a.TraceID, a.Action, a.Status, params)
+			}
+		}
+	}
 }

@@ -51,7 +51,6 @@ func (t *ListContainersTool) InvokableRun(ctx context.Context, argumentsInJSON s
 	if err := json.Unmarshal([]byte(argumentsInJSON), &args); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
-	// 调试：打印解析后的参数
 	fmt.Printf("[DEBUG] ListContainers args: %+v\n", args)
 
 	containers, err := docker.ListContainers(ctx, args)
@@ -1281,6 +1280,16 @@ func GetTools(store *storage.Storage) []tool.BaseTool {
 	if store != nil {
 		tools = append(tools, &QueryContainerStatsTool{store: store}, &QueryContainerLogsTool{store: store})
 	}
+
+	// 如果有 storage，则对所有工具进行审计包装
+	if store != nil {
+		auditedTools := make([]tool.BaseTool, len(tools))
+		for i, t := range tools {
+			auditedTools[i] = wrapWithAudit(t, store)
+		}
+		return auditedTools
+	}
+
 	return tools
 }
 

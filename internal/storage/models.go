@@ -67,13 +67,8 @@ type AuditRecord struct {
 	ID uint64 `gorm:"primaryKey"`
 	// TraceID 用于串联一次请求/对话/编排链路（可选），便于按链路聚合审计。
 	TraceID string `gorm:"size:64;index"`
-	// Actor 表示发起方（例如：agent、cli、user:<name>），用于审计归因。
-	Actor string `gorm:"size:64;not null;index"`
 	// Action 表示执行的动作（建议是稳定的“工具名/命令名”，例如 docker.ps / docker.restart）。
 	Action string `gorm:"size:128;not null;index"`
-	// TargetType/TargetID 描述被作用对象（例如 container / network / image；以及对应 ID/Name）。
-	TargetType string `gorm:"size:64;index"`
-	TargetID   string `gorm:"size:128;index"`
 	// ParamsJSON 存放动作入参（JSON 字符串），例如工具调用参数。
 	ParamsJSON string `gorm:"type:text"`
 	// ResultJSON 存放动作结果（JSON 字符串），例如工具输出摘要/结构化结果。

@@ -47,6 +47,17 @@ func (c *RetentionCollector) Run(ctx context.Context) error {
 	}
 }
 
+// Prune 执行一次性全量清理，用于 CLI 调用
+func Prune(ctx context.Context, store *storage.Storage, cfg RetentionConfig) error {
+	rc, err := NewRetentionCollector(store)
+	if err != nil {
+		return err
+	}
+	rc.cfg = cfg.withDefaults()
+	// CLI 调用时，可以考虑不强制 idle sleep，或者让用户控制，这里暂时复用逻辑
+	return rc.runOnce(ctx, time.Now().UTC())
+}
+
 func (c *RetentionCollector) runOnce(ctx context.Context, now time.Time) error {
 	if c == nil || c.store == nil {
 		return errors.New("retention collector not initialized")

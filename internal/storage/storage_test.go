@@ -306,3 +306,68 @@ func TestAuditInsertQueryUpdate(t *testing.T) {
 		t.Fatalf("unexpected updated record: status=%s result=%s", got2[0].Status, got2[0].ResultJSON)
 	}
 }
+
+func TestAuditDelete(t *testing.T) {
+	s := openTestStorage(t)
+	ctx := context.Background()
+
+	// 1. 插入测试数据
+	now := time.Now().UTC()
+	records := []AuditRecord{
+		{TraceID: "t1", Action: "act1", Status: "success", CreatedAt: now.Add(-10 * time.Hour)},
+		{TraceID: "t2", Action: "act2", Status: "success", CreatedAt: now.Add(-8 * time.Hour)},
+		{TraceID: "t3", Action: "act3", Status: "success", CreatedAt: now.Add(-6 * time.Hour)},
+		{TraceID: "t4", Action: "act4", Status: "success", CreatedAt: now.Add(-4 * time.Hour)},
+		{TraceID: "t5", Action: "act5", Status: "success", CreatedAt: now.Add(-2 * time.Hour)},
+	}
+	for _, r := range records {
+		if err := s.InsertAuditRecord(ctx, &r); err != nil {
+			t.Fatalf("insert audit: %v", err)
+		}
+	}
+
+	// 2. 测试 Count
+	count, err := s.CountAuditRecords(ctx)
+	if err != nil {
+		t.Fatalf("count audit: %v", err)
+	}
+	if count != 5 {
+		t.Fatalf("expected 5 records, got %d", count)
+	}
+
+	// 3. 测试 DeleteAuditRecordsBefore (删除 7 小时前的记录 -> t1, t2)
+	deleted, err := s.DeleteAuditRecordsBefore(ctx, now.Add(-7*time.Hour))
+	if err != nil {
+		t.Fatalf("delete audit before: %v", err)
+	}
+	if deleted != 2 {
+		t.Fatalf("expected deleted 2 records, got %d", deleted)
+	}
+
+	// 剩下 t3, t4, t5 (3条)
+	count, _ = s.CountAuditRecords(ctx)
+	if count != 3 {
+		t.Fatalf("expected 3 records remaining, got %d", count)
+	}
+
+	// 4. 测试 DeleteAuditRecordsKeepLatest (保留最近 1 条 -> 保留 t5, 删除 t3, t4)
+	deleted, err = s.DeleteAuditRecordsKeepLatest(ctx, 1)
+	if err != nil {
+		t.Fatalf("delete audit keep latest: %v", err)
+	}
+	if deleted != 2 {
+		t.Fatalf("expected deleted 2 records, got %d", deleted)
+	}
+
+	// 剩下 t5 (1条)
+	recs, err := s.QueryAuditRecords(ctx, AuditQuery{Limit: 10})
+	if err != nil {
+		t.Fatalf("query remaining: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("expected 1 record remaining, got %d", len(recs))
+	}
+	if recs[0].TraceID != "t5" {
+		t.Fatalf("expected remaining record to be t5, got %s", recs[0].TraceID)
+	}
+}

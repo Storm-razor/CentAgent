@@ -103,6 +103,17 @@ func (s *Storage) QueryContainerStats(ctx context.Context, q StatsQuery) ([]Cont
 	return out, nil
 }
 
+func (s *Storage) CountContainerStats(ctx context.Context) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, errors.New("storage not initialized")
+	}
+	var count int64
+	if err := s.db.WithContext(ctx).Model(&ContainerStat{}).Count(&count).Error; err != nil {
+		return 0, fmt.Errorf("count container stats: %w", err)
+	}
+	return count, nil
+}
+
 func (s *Storage) DeleteContainerStatsBefore(ctx context.Context, before time.Time) (int64, error) {
 	if s == nil || s.db == nil {
 		return 0, errors.New("storage not initialized")
@@ -278,6 +289,17 @@ func (s *Storage) QueryContainerLogs(ctx context.Context, q LogQuery) ([]Contain
 	return out, nil
 }
 
+func (s *Storage) CountContainerLogs(ctx context.Context) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, errors.New("storage not initialized")
+	}
+	var count int64
+	if err := s.db.WithContext(ctx).Model(&ContainerLog{}).Count(&count).Error; err != nil {
+		return 0, fmt.Errorf("count container logs: %w", err)
+	}
+	return count, nil
+}
+
 func (s *Storage) DeleteContainerLogsBefore(ctx context.Context, before time.Time) (int64, error) {
 	if s == nil || s.db == nil {
 		return 0, errors.New("storage not initialized")
@@ -425,6 +447,17 @@ func (s *Storage) QueryAuditRecords(ctx context.Context, q AuditQuery) ([]AuditR
 	return out, nil
 }
 
+func (s *Storage) CountAuditRecords(ctx context.Context) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, errors.New("storage not initialized")
+	}
+	var count int64
+	if err := s.db.WithContext(ctx).Model(&AuditRecord{}).Count(&count).Error; err != nil {
+		return 0, fmt.Errorf("count audit records: %w", err)
+	}
+	return count, nil
+}
+
 type AuditUpdate struct {
 	Status       *string
 	ResultJSON   *string
@@ -463,6 +496,59 @@ func (s *Storage) UpdateAuditRecord(ctx context.Context, id uint64, up AuditUpda
 		return gormNotFoundError("audit record", id)
 	}
 	return nil
+}
+
+func (s *Storage) DeleteAuditRecordsKeepLatest(ctx context.Context, keepCount int) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, errors.New("storage not initialized")
+	}
+	if keepCount < 0 {
+		return 0, errors.New("keep count must be non-negative")
+	}
+
+	// 1. 查找第 keepCount+1 条记录的 ID（按时间倒序）
+	// 如果总数 <= keepCount，子查询返回空，不会删除任何内容
+	// SQLite 支持 LIMIT/OFFSET，这里我们找到“分界线 ID”
+	var boundaryID uint64
+	err := s.db.WithContext(ctx).Model(&AuditRecord{}).
+		Select("id").
+		Order("created_at DESC").
+		Offset(keepCount).
+		Limit(1).
+		Scan(&boundaryID).Error
+
+	if err != nil {
+		return 0, fmt.Errorf("find audit boundary id: %w", err)
+	}
+
+	if boundaryID == 0 {
+		// 说明记录数不足 keepCount，无需删除
+		return 0, nil
+	}
+
+	// 2. 删除 ID <= boundaryID 的所有记录（假设 ID 是自增且大致随时间递增的，或者直接用 CreatedAt）
+	// 更严谨的做法是：删除那些 CreatedAt <= (boundaryRecord.CreatedAt) 且 ID != boundaryRecord.ID ...
+	// 但通常 AuditLog 只追加，ID 大小与时间正相关。
+	// 为了安全起见，我们还是用 ID 列表或者“不在前 N 个 ID 集合中”的方式。
+	// DELETE FROM audit_records WHERE id NOT IN (SELECT id FROM audit_records ORDER BY created_at DESC LIMIT ?)
+
+	res := s.db.WithContext(ctx).Where("id <= ?", boundaryID).Delete(&AuditRecord{})
+	if res.Error != nil {
+		return 0, fmt.Errorf("delete audit records: %w", res.Error)
+	}
+
+	return res.RowsAffected, nil
+}
+
+func (s *Storage) DeleteAuditRecordsBefore(ctx context.Context, before time.Time) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, errors.New("storage not initialized")
+	}
+	res := s.db.WithContext(ctx).Where("created_at < ?", before).Delete(&AuditRecord{})
+	if res.Error != nil {
+		return 0, fmt.Errorf("delete audit records: %w", res.Error)
+	}
+	return res.RowsAffected, nil
 }
 
 func normalizeLimit(v int) int {

@@ -1,9 +1,11 @@
-.PHONY: help all fmt test vet tidy build run clean lint
+.PHONY: help all fmt test vet tidy build run clean lint start chat chat-tui storage-info storage-prune-monitor storage-prune-audit
 
 GO ?= go
 APP ?= centagent
 MAIN ?= ./cmd/centagent
 BIN_DIR ?= bin
+CONFIG ?= ./configs/config.yaml
+ARGS ?=
 
 GOOS := $(shell $(GO) env GOOS)
 BIN_EXT :=
@@ -33,6 +35,12 @@ help:
 	@echo "  make tidy   - go mod tidy"
 	@echo "  make build  - build binary to $(BIN)"
 	@echo "  make run    - go run $(MAIN)"
+	@echo "  make start  - run monitor in foreground (uses CONFIG=$(CONFIG))"
+	@echo "  make chat   - run chat (console ui, uses CONFIG=$(CONFIG))"
+	@echo "  make chat-tui - run chat (tui ui, uses CONFIG=$(CONFIG))"
+	@echo "  make storage-info - show DB overview (uses CONFIG=$(CONFIG))"
+	@echo "  make storage-prune-monitor - run retention prune once (uses CONFIG=$(CONFIG))"
+	@echo "  make storage-prune-audit ARGS='--keep 1000' - prune audit records"
 	@echo "  make lint   - golangci-lint run ./..."
 	@echo "  make clean  - remove $(BIN_DIR)"
 
@@ -58,6 +66,24 @@ build:
 
 run:
 	@$(GO) run $(MAIN)
+
+start:
+	@$(GO) run $(MAIN) --config $(CONFIG) start
+
+chat:
+	@$(GO) run $(MAIN) --config $(CONFIG) chat --ui=console $(ARGS)
+
+chat-tui:
+	@$(GO) run $(MAIN) --config $(CONFIG) chat --ui=tui $(ARGS)
+
+storage-info:
+	@$(GO) run $(MAIN) --config $(CONFIG) storage info
+
+storage-prune-monitor:
+	@$(GO) run $(MAIN) --config $(CONFIG) storage prune-monitor
+
+storage-prune-audit:
+	@$(GO) run $(MAIN) --config $(CONFIG) storage prune-audit $(ARGS)
 
 
 lint:

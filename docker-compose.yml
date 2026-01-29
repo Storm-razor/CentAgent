@@ -1,0 +1,61 @@
+# CentAgent Docker Compose 运行说明
+#
+# 目标：
+# 1) 容器启动后默认常驻运行 `centagent start`（监控整个 Docker 容器系统）
+# 2) 配置文件与数据库通过挂载实现“可替换/可持久化”
+# 3) ARK_API_KEY / ARK_MODEL_ID 仅通过环境变量注入（不要写进镜像或配置文件）
+# 4) 用户需要交互时，用 `docker exec` 进入容器运行其它命令（chat/storage 等）
+
+services:
+  centagent:
+    # 如果你只想拉取预构建镜像：把 build 段删掉，改用 image: <your-registry>/centagent:tag
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # 镜像源（可选）：例如 docker.m.daocloud.io / registry.cn-hangzhou.aliyuncs.com
+        # 未设置时默认 docker.io
+        REGISTRY: ${REGISTRY_MIRROR:-docker.io}
+        # Alpine 包仓库镜像（可选）：解决 apk add 慢
+        # 例如：https://mirrors.tuna.tsinghua.edu.cn/alpine
+        ALPINE_MIRROR: ${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}
+        # Go 模块代理（可选）：解决 go mod download 慢，且避免依赖系统 git
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
+    image: centagent:local
+    container_name: centagent
+    restart: unless-stopped
+
+    # 监控“宿主机 Docker”的关键：把 Docker Engine socket 挂进容器
+    # - Linux / Docker Desktop（Linux engine）通常都是 /var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+      # 动态挂载配置文件（改完后重启容器生效）
+      - ./configs/config.yaml:/etc/centagent/config.yaml:ro
+
+      # 持久化数据库：推荐挂载目录（容器内默认 DB 文件为 /var/lib/centagent/centagent.db）
+      - centagent-data:/var/lib/centagent
+
+      # 如果你更想把“单个 DB 文件”直接落到宿主机，可改成（注意先创建 ./data 目录）：
+      # - ./data/centagent.db:/var/lib/centagent/centagent.db
+
+    environment:
+      # 必填：从宿主机环境或同目录 .env 注入 (自己生成.env)
+      ARK_API_KEY: ${ARK_API_KEY:?set ARK_API_KEY in environment or .env}
+      ARK_MODEL_ID: ${ARK_MODEL_ID:?set ARK_MODEL_ID in environment or .env}
+
+      # 可选：如果你有自定义 Ark Base URL
+      ARK_BASE_URL: ${ARK_BASE_URL:-}
+
+      # 可选：显式指定 Docker socket（通常不需要，但写上更直观）
+      DOCKER_HOST: unix:///var/run/docker.sock
+
+      # 推荐：用环境变量覆盖 DB 路径，避免依赖工作目录
+      CENTAGENT_STORAGE_PATH: /var/lib/centagent/centagent.db
+
+    # 允许 `docker exec -it centagent sh` 进入容器执行命令
+    stdin_open: true
+    tty: true
+
+volumes:
+  centagent-data:

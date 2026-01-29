@@ -1,0 +1,17 @@
+.git
+.idea
+.vscode
+
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+
+data
+tmp
+dist
+bin
+out
+docs
+
+*.log
+

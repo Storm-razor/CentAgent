@@ -1,6 +1,7 @@
 # CentAgent 项目目录结构说明
 
 本项目遵循 Go 语言标准项目布局 (Standard Go Project Layout)，并结合 CLI 工具与 Agent 开发的特性进行组织。
+可部署运行的程序请见次级分支,主分支仍在开发中
 
 ## 核心目录
 
